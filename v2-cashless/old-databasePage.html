@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Transactions</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet"> 
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh; 
+            font-family: 'Montserrat', sans-serif; 
+        }
+        table,
+        th,
+        td {
+            border: 1px solid rgb(180, 180, 180);
+            padding: 20px;
+        }
+        .status-rendu {
+            background-color: rgb(0, 200, 0);
+        }
+        .status-en-cours {
+            background-color: rgb(237, 240, 66);
+        }
+        button {
+            font-family: 'Montserrat', sans-serif;
+            padding: 10px 20px;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Transactions</h1>
+
+    <button onclick="confirmClearTable()">Vider la table</button>
+    <button onclick="refreshTable()">Rafraîchir la table</button>
+
+    <table id="transactionsTable">
+        <thead>
+            <tr>
+                <th>Transaction ID</th>
+                <th>Cup ID</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            
+        </tbody>
+    </table>
+
+    <script>
+
+        function confirmClearTable() {
+            if (confirm('Êtes-vous sûr de vouloir vider la table ?')) {
+                clearTable();
+            }
+        }
+
+        function clearTable() {
+            fetch('http://10.58.131.69:80/api/clearTable', { method: 'POST' })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    loadTableData(); 
+                })
+                .catch(error => {
+                    console.error('There has been a problem with your fetch operation:', error);
+                });
+        }
+
+        function refreshTable() {
+            loadTableData(); 
+        }
+
+        function loadTableData() {
+            fetch('http://10.58.131.69:80/api/getTableData')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const tableBody = document.getElementById('transactionsTable').getElementsByTagName('tbody')[0];
+                    tableBody.innerHTML = ''; 
+                    data.forEach(row => {
+                        const newRow = tableBody.insertRow();
+                        newRow.insertCell().innerText = row.transaction_id;
+                        newRow.insertCell().innerText = row.cup_id;
+                        const statusCell = newRow.insertCell();
+                        statusCell.innerText = row.status;
+                        if (row.status === 'rendu') {
+                            statusCell.classList.add('status-rendu');
+                        } else if (row.status === 'en cours') {
+                            statusCell.classList.add('status-en-cours');
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('There has been a problem with your fetch operation:', error);
+                });
+        }
+
+        window.onload = function () {
+            loadTableData();
+            setInterval(loadTableData, 2000); 
+        };
+    </script>
+</body>
+
+</html>

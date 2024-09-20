@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stats</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit&display=swap">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+    <script>
+        let myPieChart = null;
+        let myLineChart = null;
+        let lastPieData = null;
+        let lastLineData = null;
+
+        // Function to handle errors by displaying an error message on the page
+        function handleError(error) {
+            const errorContainer = document.createElement('div');
+            errorContainer.style = 'position: fixed; top: 0; left: 0; right: 0; z-index:10; padding: 1rem; background-color: #ff0000; color: #ffffff; font-weight: 600; text-align: center;';
+            errorContainer.textContent = 'Une erreur est survenue lors de la récupération des données. Veuillez tenter de relancer le serveur.';
+            document.body.appendChild(errorContainer);
+            console.error(error);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const statsPageButton = document.getElementById('main-page-button');
+            statsPageButton.addEventListener('click', () => {
+                window.location.href = '/db';
+            });
+
+            fetchStatsData().then(data => {
+                if (data) {
+                    displayPieChart(data.pieData);
+                    displayLineChart(data.lineData);
+                }
+            }).catch(handleError);
+
+            setInterval(async () => {
+                try {
+                    const newData = await fetchStatsData();
+                    if (newData) {
+                        if (!dataIsEqual(lastPieData, newData.pieData)) {
+                            lastPieData = newData.pieData;
+                            displayPieChart(newData.pieData);
+                        }
+                        if (!dataIsEqual(lastLineData, newData.lineData)) {
+                            lastLineData = newData.lineData;
+                            displayLineChart(newData.lineData);
+                        }
+                    }
+                } catch (error) {
+                    handleError(error);
+                }
+            }, 8000);
+        });
+
+        // Function to fetch statistics data from the server
+        async function fetchStatsData() {
+            const response = await fetch('/api/stats');
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        }
+
+        // Function to compare two data objects for equality
+        function dataIsEqual(data1, data2) {
+            if (!data1 || !data2) return false;
+            return JSON.stringify(data1) === JSON.stringify(data2);
+        }
+
+        // Function to display a pie chart with the given data
+        function displayPieChart(data) {
+            const ctx = document.getElementById('myPieChart').getContext('2d');
+            if (myPieChart) {
+                myPieChart.destroy();
+            }
+            myPieChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: ['Rendu', "En cours d'utilisation", 'En stock'],
+                    datasets: [{
+                        data: data.values,
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.2)',
+                            'rgba(54, 162, 235, 0.2)',
+                            'rgba(255, 206, 86, 0.2)'
+                        ],
+                        borderColor: [
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(255, 206, 86, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            enabled: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Function to display a line chart with the given data
+        function displayLineChart(data) {
+            const ctx = document.getElementById('myLineChart').getContext('2d');
+            if (myLineChart) {
+                myLineChart.destroy();
+            }
+
+            const adjustedLabels = data.labels.map(label => {
+                const date = new Date(`1970-01-01T${label}:00Z`);
+                date.setHours(date.getHours() + 2);
+                return date.toISOString().substr(11, 5); // Extract HH:MM
+            });
+
+            myLineChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: adjustedLabels,
+                    datasets: [{
+                        label: 'Débit association',
+                        data: data.valuesAssociation,
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1,
+                        fill: true,
+                        stepped: 'middle',
+                        pointStyle: false
+                    },
+                        {
+                            label: 'Débit collecte',
+                            data: data.valuesCollection,
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 1,
+                            fill: true,
+                            stepped: 'middle',
+                            pointStyle: false
+                        }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            enabled: true
+                        },
+                        zoom: {
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                threshold: 10
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x',
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+    </script>
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #f7fafc;
+            color: #1a202c;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            min-height: 100vh;
+            overflow-y: hidden;
+            margin-top: 4vh;
+            padding-top: 5vh;
+        }
+
+        .background-image-bottom-right {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            width: 600px;
+            height: 600px;
+            background-image: url('https://www.le-mosh.com/wp-content/uploads/monstre-mosh-2.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: bottom right;
+            z-index: -1;
+            opacity: 0.04;
+        }
+
+
+        .top-left-img {
+            position: fixed;
+            top: 30px;
+            left: 20px;
+            width: 200px;
+            height: auto;
+            z-index: -1;
+            opacity: 0.9;
+        }
+
+        .light-green-bg {
+            background-color: #d4ede4;
+        }
+
+        .light-yellow-bg {
+            background-color: #f8f0d9;
+        }
+
+        .grey-bg {
+            background-color: #aaadaf;
+        }
+
+        /* Styles pour les canvases des graphiques */
+        .chart-container {
+            display: flex;
+            justify-content: space-between;
+            width: 80%;
+            max-width: 1200px;
+            margin-top: 5rem;
+            gap: 2rem;
+        }
+
+        .a-main-page {
+            position: fixed;
+            top: 20px;
+            left: 35vh;
+            padding: 0.5rem 1rem;
+            color: #74BDB6;
+            font-size: 2rem;
+        }
+
+        .a-main-page:hover {
+            color: #63a19b;
+            text-decoration: underline;
+        }
+
+        #myPieChart {
+            width: 45%;
+            height: auto;
+            max-width: 500px;
+            max-height: 400px;
+        }
+
+        #myLineChart {
+            width: 45%;
+            height: auto;
+            max-width: 500px;
+            max-height: 400px;
+        }
+    </style>
+</head>
+<body>
+<a id="main-page-button" href="/db" class="a-main-page">
+    Retour vers Dashboard
+</a>
+
+<h1>Statistiques</h1>
+<div class=" chart-container">
+    <canvas id="myLineChart"></canvas>
+    <canvas id="myPieChart"></canvas>
+</div>
+
+<img class="top-left-img" src="/reuse-logopng.png" alt="Logo">
+</body>
+</html>

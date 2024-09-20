@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Transactions</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Montserrat', sans-serif;
+            height: 80%;
+        }
+
+        .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 80%;
+            height: 90%;
+        }
+
+        table {
+            max-height: 260px;
+            overflow-y: auto;
+            display: block;
+            border: 1px solid rgb(180, 180, 180);
+            margin-right: 100px;
+        }
+
+        th,
+        td {
+            border: 1px solid rgb(180, 180, 180);
+            padding: 10px;
+        }
+
+        .status-rendu {
+            background-color: rgb(0, 200, 0);
+        }
+
+        .status-en-cours {
+            background-color: rgb(237, 240, 66);
+        }
+        .status-non-rendu {
+            background-color: rgb(231, 95, 54);
+        }
+
+        button {
+            font-family: 'Montserrat', sans-serif;
+            padding: 10px 20px;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }
+
+        input {
+            width: 200px;
+            margin-bottom: 10px;
+        }
+
+        .buttons {
+            display: flex;
+            flex-direction: column; /* Change this line */
+            justify-content: center; /* Add this line */
+            align-items: center;
+        }
+
+        .tables {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-left: 20px;
+        }
+
+        .update-payments {
+            background-color: pink; /* Ajoutez cette ligne */
+        }
+        .update-payments:hover {
+            background-color: rgb(255, 209, 218); /* Ajoutez cette ligne */
+        }
+
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="buttons">
+            <button onclick="confirmClearTable()">Vider la base de données</button>
+            <button onclick="refreshTable()">Rafraîchir les tables</button>
+            <button class="update-payments" onclick="updatePayments()">Update Payments</button> 
+
+        </div>
+
+        <div class="tables">
+            <h1>Cups</h1>
+            <input type="search" id="searchCups" placeholder="Rechercher dans 'Cups'">
+
+            <table id="cupsTable">
+                <thead>
+                    <tr>
+                        <th>Transaction ID</th>
+                        <th>Cup ID</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                </tbody>
+            </table>
+
+            <h1>Payments</h1>
+            <input type="search" id="searchPayments" placeholder="Rechercher dans 'Payments'">
+
+
+            <table id="paymentsTable">
+                <thead>
+                    <tr>
+                        <th>Transaction ID</th>
+                        <th>Amount reserved</th>
+                        <th>Amount captured</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+
+        function confirmClearTable() {
+            if (confirm('Êtes-vous sûr de vouloir vider la base de données ?')) {
+                clearTable();
+            }
+        }
+
+        function clearTable() {
+            fetch('http://10.58.131.69:80/api/clearTable', { method: 'POST' })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    loadCupsData();
+                    loadPaymentsData();
+                })
+                .catch(error => {
+                    console.error('There has been a problem with your fetch operation:', error);
+                });
+        }
+
+        function refreshTable() {
+            loadCupsData();
+            loadPaymentsData();
+        }
+
+        function updatePayments() {
+            fetch('http://10.58.131.69:80/api/update-payments')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    loadPaymentsData();
+                })
+                .catch(error => {
+                    console.error('There has been a problem with your fetch operation:', error);
+                });
+        }
+        
+
+        function loadCupsData() {
+            fetch('http://10.58.131.69:80/api/getCupsData')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const tableBody = document.getElementById('cupsTable').getElementsByTagName('tbody')[0];
+                    tableBody.innerHTML = '';
+                    data.forEach(row => {
+                        const newRow = tableBody.insertRow();
+                        newRow.insertCell().innerText = row.transaction_id;
+                        newRow.insertCell().innerText = row.cup_id;
+                        const statusCell = newRow.insertCell();
+                        statusCell.innerText = row.status;
+                        if (row.status === 'rendu') {
+                            statusCell.classList.add('status-rendu');
+                        } else if (row.status === 'en cours') {
+                            statusCell.classList.add('status-en-cours');
+                        }
+                        else if (row.status === 'non rendu') {
+                            statusCell.classList.add('status-non-rendu');
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('There has been a problem with your fetch operation:', error);
+                });
+        }
+
+        function loadPaymentsData() {
+            fetch('http://10.58.131.69:80/api/getPaymentsData')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const tableBody = document.getElementById('paymentsTable').getElementsByTagName('tbody')[0];
+                    tableBody.innerHTML = '';
+                    data.forEach(row => {
+                        const newRow = tableBody.insertRow();
+                        newRow.insertCell().innerText = row.transaction_id;
+                        newRow.insertCell().innerText = row.amount_reserved + ' €';
+                        newRow.insertCell().innerText = row.amount_captured + ' €';
+                        const statusCell = newRow.insertCell();
+                        statusCell.innerText = row.status;
+                        if (row.status === 'rendu') {
+                            statusCell.classList.add('status-rendu');
+                        } else if (row.status === 'en cours') {
+                            statusCell.classList.add('status-en-cours');
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('There has been a problem with your fetch operation:', error);
+                });
+        }
+
+        function filterTable(tableId, searchId) {
+            const search = document.getElementById(searchId);
+            const table = document.getElementById(tableId);
+            search.addEventListener('input', function () {
+                const value = this.value.toLowerCase();
+                const rows = table.getElementsByTagName('tr');
+                for (let i = 1; i < rows.length; i++) {
+                    const cells = rows[i].getElementsByTagName('td');
+                    let found = false;
+                    for (let j = 0; j < cells.length; j++) {
+                        if (cells[j].innerText.toLowerCase().includes(value)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    rows[i].style.display = found ? '' : 'none';
+                }
+            });
+        }
+
+        window.onload = function () {
+            loadCupsData();
+            loadPaymentsData();
+            setInterval(loadCupsData, 2000);
+            setInterval(loadPaymentsData, 2000);
+
+            filterTable('cupsTable', 'searchCups');
+            filterTable('paymentsTable', 'searchPayments');
+
+        };
+    </script>
+</body>
+
+</html>

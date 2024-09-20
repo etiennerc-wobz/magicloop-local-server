@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Order</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: #f4f4f9;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background-color: #fff;
+            padding: 20px 40px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .counter {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        label {
+            flex: 1;
+            font-size: 25px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        button {
+            font-family: 'Montserrat', sans-serif;
+            background-color: #29c296;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            filter: brightness(0.8);
+        }
+
+        .counter span {
+            display: inline-block;
+            width: 30px;
+            text-align: center;
+            font-size: 18px;
+            margin: 0 10px;
+            color: #333;
+        }
+
+        .submit-buttons {
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .submit-buttons button {
+            margin: 5px;
+            background-color: #008CBA;
+        }
+
+        .submit-buttons button:hover {
+            background-color: #007BB5;
+        }
+
+        .reset-button {
+            font-size: 11px;
+            background-color: rgb(255, 98, 98) !important;
+            position: relative;
+            left: 75%;
+        }
+
+        .reset-button:hover {
+            filter: brightness(0.8);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <button id="payButton">Payer la commande</button>
+        <p id="message"></p>
+        <p id="total">Total : 0 €</p>
+    </div>
+    <br>
+    <div class="container">
+        <div class="counter">
+            <label>Blonde 6€ </label>
+            <button onclick="decrement('blonde')">-</button>
+            <span id="blonde">0</span>
+            <button onclick="increment('blonde')">+</button>
+        </div>
+        <div class="counter">
+            <label>Brune 6€ </label>
+            <button onclick="decrement('brune')">-</button>
+            <span id="brune">0</span>
+            <button onclick="increment('brune')">+</button>
+        </div>
+        <div class="counter">
+            <label>Coca 3€ </label>
+            <button onclick="decrement('coca')">-</button>
+            <span id="coca">0</span>
+            <button onclick="increment('coca')">+</button>
+        </div>
+        <button class="reset-button" onclick="resetCounters()">Reset Counters</button>
+        <div class="submit-buttons">
+            <button onclick="sendSSE('http://10.58.131.69:80/get-transaction1')">Send to Bar 1</button>
+            <button onclick="sendSSE('http://10.58.131.69:80/get-transaction2')">Send to Bar 2</button>
+            <button onclick="sendSSE('http://10.58.131.69:80/get-transaction3')">Send to Bar 3</button>
+        </div>
+    </div>
+
+    <script>
+
+        document.getElementById('payButton').addEventListener('click', async () => {
+            document.getElementById('message').textContent = "Paiement accepté. Envoi de la commande au bar 1...";
+            sendSSE('http://10.58.131.69:80/get-transaction1');
+
+            setTimeout(() => {
+                document.getElementById('message').textContent = "";
+                document.getElementById('total').textContent = "Total : 0 €";
+            }, 20000); 
+        });
+
+
+
+        function updateTotal() {
+            var blonde = parseInt(document.getElementById('blonde').textContent, 10);
+            var brune = parseInt(document.getElementById('brune').textContent, 10);
+            var coca = parseInt(document.getElementById('coca').textContent, 10);
+
+            var total = blonde * 8 + brune * 8 + coca * 5;
+
+            document.getElementById('total').innerHTML = "Total : <strong>" + total + "</strong> € <br>(dont " + (blonde + brune + coca) * 2 + " € de caution)";
+        }
+
+        function increment(id) {
+            var element = document.getElementById(id);
+            var value = parseInt(element.textContent, 10);
+            element.textContent = value + 1;
+            updateTotal();
+        }
+
+        function decrement(id) {
+            var element = document.getElementById(id);
+            var value = parseInt(element.textContent, 10);
+            if (value > 0) {
+                element.textContent = value - 1;
+            }
+            updateTotal();
+        }
+
+        function resetCounters() {
+            document.getElementById('blonde').textContent = '0';
+            document.getElementById('brune').textContent = '0';
+            document.getElementById('coca').textContent = '0';
+            updateTotal();
+        }
+
+        function sendSSE(url) {
+            console.log("Sending data to " + url);
+            var blonde = parseInt(document.getElementById('blonde').textContent, 10);
+            var brune = parseInt(document.getElementById('brune').textContent, 10);
+            var coca = parseInt(document.getElementById('coca').textContent, 10);
+
+            if (blonde + brune + coca === 0) {
+                alert("La commande est vide. Veuillez ajouter au moins un article.");
+                return;
+            }
+
+            var data = blonde + "blonde-" + brune + "brune-" + coca + "coca";
+            var xhr = new XMLHttpRequest();
+            console.log(data);
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.send("data=" + encodeURIComponent(data));
+
+            document.getElementById('blonde').textContent = '0';
+            document.getElementById('brune').textContent = '0';
+            document.getElementById('coca').textContent = '0';
+        }
+    </script>
+</body>
+
+</html>

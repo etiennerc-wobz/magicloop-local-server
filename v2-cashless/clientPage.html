@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Page client</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        input[type="text"] {
+            width: 350px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }
+    </style>
+    <script>
+        function sendEndLocationRequest() {
+            console.log("sendEndLocationRequest");
+            var xhr = new XMLHttpRequest();
+            var url = "http://localhost:80/end-location";
+
+            // Get the value of the input field
+            var cupListInput = document.getElementById('cupListInput').value;
+
+            // Split the input into an array of strings
+            var cupList = cupListInput.split(',');
+
+            var end_location_cup_list = {
+                "cup_list": cupList
+            }
+
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    console.log(xhr.responseText);
+                }
+            };
+            xhr.send(JSON.stringify(end_location_cup_list));
+        }
+
+        function sendStartLocationRequest() {
+            console.log("sendStartLocationRequest");
+            var xhr = new XMLHttpRequest();
+            var url = "http://localhost:80/start-location";
+            var start_location_data = {
+                "transaction_id": generateRandomId(8),
+                "cup_list": [
+                    generateRandomId(8),
+                    generateRandomId(8),
+                    generateRandomId(8)
+                ]
+            }
+
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    console.log(xhr.responseText);
+                }
+            };
+            xhr.send(JSON.stringify(start_location_data));
+        }
+
+        function generateRandomId(length) {
+            var result = '';
+            var characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            var charactersLength = characters.length;
+            for (var i = 0; i < length; i++) {
+                result += characters.charAt(Math.floor(Math.random() * charactersLength));
+            }
+            return result;
+        }
+    </script>
+</head>
+
+<body>
+    <input type="text" id="cupListInput" placeholder="Entrez des cup_id à rendre (séparés par des virgules)">
+    <button onclick="sendEndLocationRequest()">Send End Location Request</button>
+    <br><br>
+    <button onclick="sendStartLocationRequest()">Envoyer une requête POST à /start-location</button>
+</body>
+
+</html>

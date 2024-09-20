@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit&display=swap">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.8.0/nouislider.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.8.0/nouislider.min.js"></script>
+
+    <script>
+        let expandedItems = {};
+        let slider;
+        let allPayments = [];
+        let allItems = [];
+        let loading = true;
+        let festivalEnded = false;
+        let currentController = null;
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            const options = {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'Europe/Paris'
+            };
+            return date.toLocaleString('fr-FR', options).replace(',', ' -');
+        }
+
+        function handleError(error) {
+            if (error.name === 'AbortError') {
+                return;
+            }
+            const errorContainer = document.createElement('div');
+            errorContainer.style = 'position: fixed; top: 0; left: 0; right: 0; z-index:10; padding: 1rem; background-color: #ff0000; color: #ffffff; font-weight: 600; text-align: center;';
+            errorContainer.textContent = "Une erreur est survenue lors de la récupération des données. Veuillez tenter de relancer l'app.";
+            document.body.appendChild(errorContainer);
+            console.error(error);
+
+            setTimeout(() => {
+                errorContainer.remove();
+            }, 5000);
+        }
+
+
+        async function fetchData() {
+
+            const data = await fetch('/api/data')
+                .then(response => response.json())
+                .catch(handleError);
+            loading = false;
+            allPayments = data.payments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            allItems = data.items;
+
+            displayFilteredData();
+
+        }
+
+        function displayFilteredData() {
+            if (!slider) {
+                console.error('Slider not found');
+                return;
+            }
+            const [startTime, endTime] = slider.noUiSlider.get();
+
+            const filteredPayments = allPayments.filter(payment => {
+                const paymentDate = new Date(payment.createdAt);
+                const paymentHours = paymentDate.getHours();
+                const paymentMinutes = paymentDate.getMinutes();
+                const paymentTime = paymentHours + (paymentMinutes >= 30 ? 0.5 : 0);
+
+                const [startHours, startMinutes] = startTime.split(':').map(Number);
+                const [endHours, endMinutes] = endTime.split(':').map(Number);
+                const startTimeValue = startHours + (startMinutes === 30 ? 0.5 : 0);
+                const endTimeValue = endHours + (endMinutes === 30 ? 0 : -0.5);
+
+                return paymentTime >= startTimeValue && paymentTime <= endTimeValue;
+            });
+
+            const paymentsList = document.getElementById('payments-list');
+            paymentsList.innerHTML = '';
+
+            if (filteredPayments.filter(payment => payment.amount > 0).length === 0) {
+                if (loading) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td colspan="6" style="text-align: center;">Chargement...</td>';
+                    paymentsList.appendChild(tr);
+                } else {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td colspan="6" style="text-align: center;">Vide...</td>';
+                    paymentsList.appendChild(tr);
+                }
+            }
+
+            filteredPayments.forEach(payment => {
+                if (payment.amount < 0) {
+                    return;
+                }
+                const amountInEuros = payment.amount / 100;
+                const tr = document.createElement('tr');
+                tr.classList.add('sub-container');
+                tr.addEventListener('click', function (event) {
+                    const exploder = this.querySelector('.exploder');
+                    exploder.click();
+                });
+                tr.innerHTML = `
+                    <td>
+                        <button type="button" class="btn btn-success exploder">
+                            <span class="glyphicon glyphicon-chevron-right"></span>
+                        </button>
+                    </td>
+                    <td>${payment['@id'].split('/').pop()}</td>
+                    <td>${formatDate(payment.createdAt)}</td>
+                    <td>${amountInEuros} € (dont ${(amountInEuros * 0.4).toFixed(1)}0€ de frais d'usage)</td>
+                    <td>${payment.items_collectes < 1 && !festivalEnded ? '/'
+                    : payment.items_collectes < 1 && festivalEnded ? '0.00 €'
+                        : (payment.items_collectes - payment.items_collectes * 0.4).toFixed(1) + '0 €'}</td>                    <td>${payment.amount / 100}</td>
+                    <td class="${payment.status === 'terminé' ? 'grey-bg' : festivalEnded ? 'grey-bg' : ''}">${payment.status === 'en cours' && festivalEnded ? 'terminé' : payment.status}</td>
+
+                `;
+                paymentsList.appendChild(tr);
+
+                const itemsTr = document.createElement('tr');
+                itemsTr.classList.add('explode', 'hide');
+                itemsTr.innerHTML = `
+                    <td colspan="7" style="background: #f3fffb; display: none;">
+                        <table class="table table-condensed">
+                            <thead>
+                                <tr>
+                                    <th>ID de l'Item</th>
+                                    <th>RFID</th>
+                                    <th>Statut</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${allItems.length === 0 ? '<tr><td colspan="3">Aucun item</td></tr>' : ''}
+                                ${allItems.filter(item => item.payment_id === payment['@id'].split('/').pop()).length === 0 ? '<tr><td colspan="3">Aucun item</td></tr>' : ''}
+                                ${allItems.filter(item => item.payment_id === payment['@id'].split('/').pop()).map(item => `
+                                    <tr>
+                                        <td>${item.id}</td>
+                                        <td>${item.rfid}</td>
+                                        <td class="${
+                    item.status === 'COLLECTED' ? 'light-green-bg'
+                        : item.status === 'IN_USE' && !festivalEnded ? 'light-yellow-bg'
+                            : item.status === 'IN_USE' && festivalEnded ? 'light-red-bg'
+                                : ''}">
+                                            ${item.status === 'IN_USE' && festivalEnded ? 'manquant'
+                    : item.status === 'IN_USE' && !festivalEnded ? 'en cours d\'utilisation'
+                        : item.status === 'COLLECTED' ? 'rendu' : item.status}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </td>
+                `;
+                paymentsList.appendChild(itemsTr);
+
+                if (expandedItems[payment['@id'].split('/').pop()]) {
+                    $(itemsTr).removeClass('hide').find('td').show();
+                    $(tr).find('.exploder').toggleClass('btn-success btn-danger').children("span").toggleClass("glyphicon-chevron-right glyphicon-chevron-down");
+                }
+            });
+
+            $(".exploder").off('click').on('click', function (event) {
+
+                event.stopPropagation();
+
+                const $btn = $(this);
+                const $row = $btn.closest("tr").next("tr");
+                const paymentId = $btn.closest("tr").find('td').eq(1).text();
+
+                $btn.toggleClass("btn-success btn-danger");
+                $btn.children("span").toggleClass("glyphicon-chevron-right glyphicon-chevron-down");
+
+                $row.toggleClass("hide");
+
+                if ($row.hasClass("hide")) {
+                    $row.children("td").slideUp();
+                    expandedItems[paymentId] = false;
+                } else {
+                    $row.children("td").slideDown(350);
+                    expandedItems[paymentId] = true;
+                }
+            });
+        }
+
+        function handleFestivalEnd() {
+            //Count the items that are not in 'rendu' state
+            const itemsNotReturned = allItems.filter(item => item.status !== 'COLLECTED').length;
+            const itemsReturned = allItems.filter(item => item.status === 'COLLECTED').length;
+            const endfestivalDiv = document.getElementById('end-festival-infos');
+            endfestivalDiv.innerHTML = `
+                <div style="background-color: rgba(145,234,226,0.27); position:fixed; right:20vh; top:7rem; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem;">
+                    <p>Le festival est terminé.</p>
+                    <p>Nombre d'items non rendus : <strong> ${itemsNotReturned}</strong></p>
+                    <p>Nombre d'items rendus : <strong> ${itemsReturned}</strong></p>
+                </div>
+            `;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const refreshButton = document.getElementById('refresh-button');
+            refreshButton.addEventListener('click', manualRefresh);
+
+            const endButton = document.getElementById('end-button');
+            endButton.addEventListener('click', () => {
+                if (!confirm('Êtes-vous sûr de vouloir mettre fin au festival ?')) {
+                    return;
+                }
+                festivalEnded = true;
+                handleFestivalEnd();
+            });
+
+            slider = document.getElementById('hour-slider');
+
+            noUiSlider.create(slider, {
+                start: [9, 18],
+                connect: true,
+                step: 0.5,
+                range: {
+                    'min': 9,
+                    'max': 18
+                },
+                format: {
+                    to: function (value) {
+                        const hours = Math.floor(value);
+                        const minutes = (value % 1) === 0.5 ? '30' : '00';
+                        return hours.toString().padStart(2, '0') + ':' + minutes;
+                    },
+                    from: function (value) {
+                        const [hours, minutes] = value.split(':').map(Number);
+                        return hours + (minutes === 30 ? 0.5 : 0);
+                    }
+                }
+            });
+
+            const startHourDisplay = document.getElementById('start-hour');
+            const endHourDisplay = document.getElementById('end-hour');
+
+            slider.noUiSlider.on('update', function (values, handle) {
+                startHourDisplay.textContent = values[0];
+                endHourDisplay.textContent = values[1];
+                displayFilteredData();
+            });
+
+            fetchData();
+            setInterval(fetchData, 5000);
+        });
+
+        async function manualRefresh() {
+            console.log('Refreshing data...');
+
+            const response = await fetch('/refresh');
+            const responseText = await response.text();
+            const refreshDate = document.getElementById('refresh-date');
+            refreshDate.textContent = `Dernière mise à jour : ${new Date().toLocaleTimeString('fr-FR')}`;
+
+
+        }
+
+
+    </script>
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #f7fafc;
+            color: #1a202c;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 0;
+            position: relative;
+            min-height: 100vh;
+        }
+
+        .background-image-bottom-right {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            width: 600px;
+            height: 600px;
+            background-image: url('https://www.le-mosh.com/wp-content/uploads/monstre-mosh-2.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: bottom right;
+            z-index: -1;
+            opacity: 0.3;
+        }
+
+        @keyframes blink {
+            0% {
+                fill: black;
+            }
+            50% {
+                fill: #1AE6AB;
+            }
+            100% {
+                fill: black;
+            }
+        }
+
+
+        .refresh-button {
+            font-family: 'Outfit', sans-serif;
+            background-color: #74BDB6;
+            color: #ffffff;
+            border: 0px;
+            padding: 0.8rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            z-index: -4;
+        }
+
+        .refresh-button:hover {
+            background-color: #59938d;
+        }
+
+        .end-button {
+            font-family: 'Outfit', sans-serif;
+            background-color: #bd8f8f;
+            color: #ffffff;
+            border: 0px;
+            padding: 0.8rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            z-index: -4;
+        }
+
+        .end-button:hover {
+            background-color: #a17c7c;
+        }
+
+        .refresh-container {
+            position: fixed;
+            top: 20px;
+            right: 18vh;
+            display: flex;
+            align-items: end;
+            justify-content: end;
+            gap: 1rem;
+            width: 40%;
+            z-index: 4;
+        }
+
+        .containerBig {
+            margin-top: 8rem;
+            width: 80%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .containerTab {
+            margin-top: 2rem;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            z-index: 2;
+            padding-bottom: 2vh;
+        }
+
+        .table-container {
+            width: 100%;
+            overflow-y: auto;
+            background-color: #ffffff;
+            border-radius: 0.5rem;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: center;
+            font-family: 'Outfit', sans-serif;
+            margin: 0px;
+        }
+
+        .table-condensed > thead > tr > th, .table-condensed > tbody > tr > th, .table-condensed > tfoot > tr > th, .table-condensed > thead > tr > td, .table-condensed > tbody > tr > td, .table-condensed > tfoot > tr > td {
+            padding: 0.75rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: center;
+            font-family: 'Outfit', sans-serif;
+            margin: 0px;
+
+        }
+
+        tr {
+            border: 4px solid #edf2f7;
+        }
+
+        th, td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #edf2f7;
+            vertical-align: top;
+            font-size: 1.9vh;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f7fafc;
+            font-weight: 600;
+            font-size: 2vh;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover {
+            background-color: #f5f5f5;
+            cursor: pointer;
+        }
+
+        #stats-page-link {
+            position: fixed;
+            top: 20px;
+            left: 35vh;
+            font-family: 'Outfit', sans-serif;
+            color: #74BDB6;
+            cursor: pointer;
+            border: none;
+            background: none;
+            padding: 0.5rem 1rem;
+            border-radius: 2.5rem;
+            font-size: 2rem;
+        }
+
+        #stats-page-link:hover {
+            color: #5a948f;
+            text-decoration: underline;
+        }
+
+        .time-filter {
+            margin-bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .top-left-img {
+            position: fixed;
+            top: 30px;
+            left: 20px;
+            width: 200px;
+            height: auto;
+            z-index: -1;
+            opacity: 0.9;
+        }
+
+        .hour-display {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 300px;
+        }
+
+        #hour-slider {
+            width: 100%;
+            max-width: 300px;
+            height: 12px;
+        }
+
+
+        .btn-success, .btn-success:hover, .btn-success:focus, .btn-success:active {
+            border-radius: 50%;
+            padding: 0.3rem;
+            font-size: 0.9rem;
+            color: black;
+            background-color: transparent;
+            outline: none;
+            border: none;
+        }
+
+        .btn-danger, .btn-danger:hover, .btn-danger:focus, .btn-success:active {
+            border-radius: 50%;
+            padding: 0.3rem;
+            font-size: 0.9rem;
+            color: black;
+            background-color: transparent;
+            outline: none;
+            border: none;
+
+        }
+
+
+        .glyphicon {
+            font-size: 1.2rem;
+        }
+
+        .hide {
+            display: none;
+        }
+
+        .light-green-bg {
+            background-color: #d4ede4;
+        }
+
+        .light-yellow-bg {
+            background-color: #f8f0d9;
+        }
+
+        .light-red-bg {
+            background-color: #f8d7da;
+        }
+
+        .grey-bg {
+            background-color: #aaadaf;
+        }
+
+        .noUi-connect {
+            background: #74BDB6;
+        }
+
+
+        .noUi-base {
+            background: rgba(116, 189, 182, 0.21);
+            top: 50%;
+            height: 8px;
+        }
+
+        .noUi-target {
+            border: 0px;
+            box-shadow: none;
+        }
+
+        .noUi-origin {
+            height: 4px;
+        }
+
+        .noUi-handle {
+            transform: translateY(-30%);
+            transform: translateX(-80%);
+            border: 2px solid #74BDB6;
+            background: #7ccec6;
+            box-shadow: none;
+            border-radius: 50%;
+        }
+
+        .noUi-horizontal .noUi-handle {
+            width: 15px;
+            height: 20px;
+        }
+
+        .noUi-handle:hover {
+            background: #69aba5;
+        }
+
+        .noUi-handle:active {
+            outline: 2px solid #a0ece5;
+        }
+
+        .noUi-handle:before,
+        .noUi-handle:after {
+            display: none;
+        }
+
+        .noUi-tooltip {
+            display: none;
+        }
+
+        .noUi-active .noUi-tooltip {
+            display: block;
+        }
+
+        .dropdown {
+            position: relative;
+            display: inline-block;
+
+        }
+
+        .btn-primary {
+            background-color: transparent;
+            outline: 3px solid #74BDB6;
+            color: #74BDB6;
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+
+        .btn-primary:hover {
+            background-color: rgba(116, 189, 182, 0.34);
+        }
+
+        .dropdown-toggle.btn-primary:focus, .dropdown-toggle.btn-primary:active {
+            background-color: rgba(116, 189, 182, 0.34);
+            outline: 3px solid #74BDB6;
+        }
+
+        .open > .dropdown-toggle.btn-primary {
+            background-color: rgba(116, 189, 182, 0.34);
+            outline: 3px solid #74BDB6;
+        }
+
+        .btn-primary:focus, .btn-primary:active {
+            background-color: rgba(116, 189, 182, 0.34);
+            outline: 3px solid #74BDB6;
+        }
+
+        .btn-primary.active.focus,
+        .btn-primary.active:focus,
+        .btn-primary.active:hover,
+        .btn-primary:active.focus,
+        .btn-primary:active:focus,
+        .btn-primary:active:hover,
+        .open > .dropdown-toggle.btn-primary.focus,
+        .open > .dropdown-toggle.btn-primary:focus,
+        .open > .dropdown-toggle.btn-primary:hover {
+            outline: 3px solid #74BDB6;
+            color: #fff;
+            background-color: rgba(116, 189, 182, 0.34);
+        }
+
+        .dropdown-menu {
+            right: 0;
+            left: auto;
+            min-width: 200px;
+            cursor: pointer;
+        }
+
+    </style>
+</head>
+<body>
+<a id="stats-page-link" href="/stats">
+    Voir les statistiques
+</a>
+<div class="refresh-container">
+    <div id="refresh-date"></div>
+    <div class="dropdown">
+        <button class="btn btn-primary dropdown-toggle" type="button" id="menuButton" data-toggle="dropdown"
+                aria-haspopup="true" aria-expanded="false">
+            <i class="glyphicon glyphicon-menu-hamburger"></i>
+
+        </button>
+        <ul class="dropdown-menu" aria-labelledby="menuButton">
+            <li><a id="end-button" style="color: #603434;"
+                >Fin du festival</a></li>
+            <li><a id="refresh-button" style="color: #356e69;"
+                >Vider la BD</a></li>
+        </ul>
+    </div>
+</div>
+<div id="end-festival-infos"></div>
+<div class="containerBig">
+    <h1>Dashboard</h1>
+    <div class="containerTab">
+        <div class="time-filter">
+            <div id="hour-slider"></div>
+            <div class="hour-display">
+                <span>De <span id="start-hour">00:00</span></span>
+                <span>à <span id="end-hour">24:00</span></span>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table class="table table-condensed">
+                <thead>
+                <tr>
+                    <th></th>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Montant payé pour les contenants</th>
+                    <th>Montant remboursé</th>
+                    <th>Nombre de contenants</th>
+                    <th>Statut</th>
+                </tr>
+                </thead>
+                <tbody id="payments-list">
+                <!-- Les lignes de paiements et d'items seront insérées ici -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<img class="top-left-img" src="/reuse-logopng.png" alt="Logo">
+
+
+</body>
+</html>

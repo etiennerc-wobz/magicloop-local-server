@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "sqlite3": "^5.1.7",
+    "stripe": "^15.11.0"
+  },
+  "scripts": {
+    "start": "node v1-local-server.js"
+  }
+}
