@@ -22,7 +22,7 @@ To get started with the project, follow these steps:
 1. Clone the repository to your local machine.
 2. Navigate to the folder of the specific POC you want to run (e.g., `v1-stripe`).
 3. Install the required dependencies by running `npm install` in the terminal.
-4. Start the application by running `nmp start` (or `node server.js`  (replace server.js by the file name for the POC you're running)).
+4. Start the application by running `npm start` (or `node server.js`  (replace server.js by the file name for the POC you're running)).
 5. The application should now be running on the address displayed in the CLI.
 
 ## Folder Structure

@@ -10,9 +10,24 @@ import {open} from "sqlite";
 
 import AsyncLock from 'async-lock';
 
+import paginate from 'paginate'; //instead of const express = require('express');
+const paginator = paginate();
+
 const lock = new AsyncLock();
 const requestQueue = [];
+const apiHostProd = 'http://mosh-back.rag-cloud-bg.hosteur.com/api'; // Prod
+const apiHostDev = 'http://localhost:8000/api'; // Dev
 
+// Change here to use dev API
+const apiHost = apiHostProd;
+
+// Switch to apiHostDev to use app with dev API
+const apiItems = `${apiHost}/items`;
+const apiLoginCheck = `${apiHost}/login_check`;
+const apiPaymentTransactions = `${apiHost}/payment_transactions`
+
+const apiUsername = 'etienne_supreme@wobz.com';
+const apiPassword = 'password';
 
 const app = express();
 const now = new Date();
@@ -20,13 +35,26 @@ const year = now.getFullYear();
 const month = String(now.getMonth() + 1).padStart(2, '0');
 const day = String(now.getDate()).padStart(2, '0');
 let hour = String(now.getHours()).padStart(2, '0');
-hour = hour - 2;
+hour = hour - 2; // JBO : To ensure to be the day before or... ? Why - 2 ?
 let minute = String(now.getMinutes()).padStart(2, '0');
-minute = minute - 1;
+minute = minute - 1; // JBO : To ensure to be the day before or... ? Why - 1 ?
 const second = String(now.getSeconds()).padStart(2, '0');
 const formattedDate = `${year}-${month}-${day}T${hour}:${minute}:${second}+00:00`;
 
+const itemTypeToFetch = 'MAMA%20Item';
+
+const transactionType = {
+    payment: 'PAYMENT',
+    refund: 'REFUND'
+}
+
 let lastRefreshDate = formattedDate;
+let db;
+
+// PAGINATION
+let itemsPerPage = 25; // Default items per page
+let totalItems = 0; // Default total items
+let page = 1; // Default page
 
 const lastRefreshFile = './public/lastRefresh.yml';
 if (fs.existsSync(lastRefreshFile)) {
@@ -50,9 +78,16 @@ app.use(session({
     resave: false, saveUninitialized: true, cookie: {secure: false}
 }));
 
+let openDb = async () => {
+    if (!db) {
+        await connectDb();
+    }
+    return db;
+};
+
 //Fonction pour ouvrir la base de données SQLite
-const openDb = async () => {
-    return open({
+const connectDb = async () => {
+    db = await open({
         filename: './dashboardData.db',
         driver: sqlite3.Database
     });
@@ -61,20 +96,17 @@ const openDb = async () => {
 // Fonction pour vider toutes les lignes de la base de données
 const wipeAllDBRows = async () => {
     console.log('*** Wiping all rows from the database ***');
-    const db = await openDb();
+    db = await openDb();
     await db.exec('DELETE FROM payments');
     await db.exec('DELETE FROM items');
-    await db.close();
 }
 
 // Fonction pour effectuer le login et stocker le token
 async function loginAndGetTokenAndCookie(req) {
-    const username = 'etienne_supreme@wobz.com';
-    const password = 'password';
-    const body = JSON.stringify({username, password});
+    const body = JSON.stringify({username: apiUsername, password: apiPassword});
 
     try {
-        const response = await fetch('http://mosh-back.rag-cloud-bg.hosteur.com/api/login_check', {
+        const response = await fetch(apiLoginCheck, {
             method: 'POST', headers: {'Content-Type': 'application/json'}, body
         });
         if (!response.ok) {
@@ -94,9 +126,8 @@ async function loginAndGetTokenAndCookie(req) {
 
 // Fonction pour lire les paiements depuis la base de données
 async function readPaymentsFromDb() {
-    const db = await openDb();
+    db = await openDb();
     const payments = await db.all('SELECT * FROM payments');
-    await db.close();
     return payments;
 }
 
@@ -116,9 +147,13 @@ const withRetry = async (fn, retries = 5, delay = 100) => {
     }
 };
 
+function getIdFromIRI (iri) {
+    return iri.split('/').pop()
+}
+
 // Fonction pour écrire les paiements dans la base de données
 async function writePaymentsToDb(payments) {
-    const db = await openDb();
+    db = await openDb();
 
     await db.exec('BEGIN TRANSACTION');
 
@@ -138,12 +173,11 @@ async function writePaymentsToDb(payments) {
     }
 
     await db.exec('COMMIT');
-    await db.close();
 }
 
 // Fonction pour mettre à jour le nombre d'items collectés dans la base de données
 async function updateCollectedCountPaymentToDb(payments) {
-    const db = await openDb();
+    db = await openDb();
 
     await db.exec('BEGIN TRANSACTION');
 
@@ -162,12 +196,11 @@ async function updateCollectedCountPaymentToDb(payments) {
     }
 
     await db.exec('COMMIT');
-    await db.close();
 }
 
 //Fonction pour écrire les items dans la base de données
 async function writeItemsToDb(items) {
-    const db = await openDb();
+    db = await openDb();
 
     const recordedPayments = await readPaymentsFromDb();
     const finishedPayments = recordedPayments.filter(payment => payment.status === 'terminé');
@@ -199,35 +232,33 @@ async function writeItemsToDb(items) {
                                                   payment_id     = excluded.payment_id,
                                                   associationDate= excluded.associationDate,
                                                   collectionDate = excluded.collectionDate
-                `, [item.id, item.details.rfid, item.details.itemStateName, item.payment_id, itemDate, null]);
-            } else if (item.details.itemStateName === 'COLLECTED' && itemRecord.collectionDate === null) {
+                `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null]);
+            } else if (item.itemStateName === 'COLLECTED' && itemRecord.collectionDate === null) {
                 await db.run(`
                     UPDATE items
                     SET status         = ?,
                         collectionDate = ?
                     WHERE id = ?
                       AND payment_id = ?
-                `, [item.details.itemStateName, itemDate, item.id, item.payment_id]);
+                `, [item.itemStateName, itemDate, item.id, item.payment_id]);
             }
         } else {
             await db.run(`
                 INSERT INTO items (id, rfid, status, payment_id, associationDate, collectionDate)
                 VALUES (?, ?, ?, ?, ?, ?)
-            `, [item.id, item.details.rfid, item.details.itemStateName, item.payment_id, itemDate, null]);
+            `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null]);
         }
     }
 
     // Fin de la transaction
     await db.exec('COMMIT');
-    await db.close();
 }
 
 
 // Fonction pour extraire les items depuis la base de données et associer l'ID du paiement
 async function extractItemsFromDb() {
-    const db = await openDb();
+    db = await openDb();
     const payments = await db.all("SELECT id, items, status FROM payments WHERE status != 'terminé' OR status IS NULL");
-    await db.close();
 
     const items = [];
     payments.forEach(payment => {
@@ -236,54 +267,53 @@ async function extractItemsFromDb() {
             items.push({id: itemId, payment_id: payment.id});
         });
     });
-
     return items;
 }
 
 // Fonction pour extraire tous les items de la base de données
 async function getAllItemsFromDb() {
-    const db = await openDb();
+    db = await openDb();
     const items = await db.all('SELECT * FROM items');
-    await db.close();
     return items;
 }
 
+app.get('/api/refreshDate', async (req, res) => {
+    res.json(lastRefreshDate);
+});
+
 // Fonction pour extraire les paiements via API et les lier aux items
-async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefreshDate, prioritize = false) {
+async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate = lastRefreshDate, prioritize = false) {
     return new Promise((resolve, reject) => {
         const task = async () => {
             try {
                 let allPayments = [];
-                let page = 1;
-                let hasMoreData = true;
-
+                let url = `${apiPaymentTransactions}` +
+                    `?page=${page}` +
+                    `&itemsPerPage=${itemsPerPage}` +
+                    `&transactionType.type=${transactionType.payment}` +
+                    `&createdAt%5Bafter%5D=${encodeURIComponent(refreshDate)}` +
+                    `&amount%5Bgt%5D=0` +
+                    `&order%5BcreatedAt%5D=desc` + 
+                    `&order%5BtransactionId%5D=asc`
+                ;
 
                 console.log('Fetching data at date after ', refreshDate, ' ....');
-                // Fetch all payments
-                while (hasMoreData) {
 
-                    const response = await fetch(`http://mosh-back.rag-cloud-bg.hosteur.com/api/payment_transactions?page=${page}&createdAt%5Bafter%5D=${encodeURIComponent(refreshDate)}`, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json',
-                            'Cookie': cookieHeader
-                        },
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                        'Cookie': cookieHeader
+                    },
+                });
 
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    const pageData = data['hydra:member'].filter(payment => (payment.type === 'PAYMENT' && payment.amount > 0));
-                    allPayments = allPayments.concat(pageData);
-
-                    hasMoreData = data['hydra:view'] && data['hydra:view']['hydra:next'] !== undefined;
-                    page++;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                console.log('Got a total of ', allPayments.length, ' payments');
 
+                const data = await response.json();
+                allPayments = data['hydra:member'];
+                totalItems = data['hydra:totalItems'];
 
                 // Lire les paiements déjà enregistrés
                 const recordedPayments = await readPaymentsFromDb();
@@ -292,8 +322,8 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
                 // Identifier les nouveaux paiements et les paiements existants avec des mises à jour
                 const paymentsToWrite = [];
                 allPayments.forEach(payment => {
-                    const paymentId = payment['@id'].split('/').pop();
-                    const newItems = payment.items.map(item => item.split('/').pop()).join(',');
+                    const paymentId = getIdFromIRI(payment['@id']);
+                    const newItems = payment.items.map(item => getIdFromIRI(item)).join(',');
 
                     if (recordedPaymentsMap.has(paymentId)) {
                         if (recordedPaymentsMap.get(paymentId).status === 'terminé') {
@@ -326,7 +356,6 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
                     }
                 });
 
-
                 // Écrire les paiements mis à jour et les nouveaux paiements dans la base de données
                 await writePaymentsToDb(paymentsToWrite);
 
@@ -334,34 +363,65 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
                 const extractedItems = await extractItemsFromDb();
 
                 // Fetch items by IDs
-                const allItems = [];
+                let allItems = [];
+                let itemIds = [];
+                let itemPaymentId = {};
                 for (const item of extractedItems) {
+                    itemIds.push(item.id);
+                    itemPaymentId[item.id] = item.payment_id;
+                }
+                const getParameter = itemIds.join(`&id%5B%5D=`);
+                let customItemPage = 1;
+                let customItemsPerPage = 50;
+                let getParameterWithPagination = getParameter + `&page=${customItemPage}&itemsPerPage=${customItemsPerPage}`;
+                let dataItems;
 
-                    const response = await fetch(`http://mosh-back.rag-cloud-bg.hosteur.com/api/items/${item.id}`, {
+                if(itemIds.length > 0) {
+                    const response = await fetch(`${apiItems}?&id%5B%5D=${getParameterWithPagination}`, {
                         headers: {
                             'Authorization': `Bearer ${token}`,
                             'Content-Type': 'application/json',
                             'Cookie': cookieHeader
                         }
-
                     });
 
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
 
+                    dataItems = await response.json();
+                }
 
-                    const itemDetails = await response.json();
-                    allItems.push({
-                        id: item.id,
-                        details: itemDetails,
-                        payment_id: item.payment_id
+                if (dataItems && dataItems['hydra:member'] && dataItems['hydra:member'] !== undefined) {
+                    allItems = dataItems['hydra:member'];
+                }
+
+                let hasMoreData = dataItems && dataItems['hydra:view'] && dataItems['hydra:view']['hydra:next'] !== undefined;
+                while (hasMoreData) {
+                    customItemPage ++;
+                    getParameterWithPagination = getParameter + `&page=${customItemPage}&itemsPerPage=${customItemsPerPage}`;
+                    const response = await fetch(`${apiItems}?&id%5B%5D=${getParameterWithPagination}`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                            'Cookie': cookieHeader
+                        }
                     });
+                    let newDataItems = await response.json();
+                    allItems = allItems.concat(newDataItems['hydra:member']);
+                    hasMoreData = newDataItems['hydra:view'] && newDataItems['hydra:view']['hydra:next'] !== undefined
+                }
+
+                if(allItems && allItems.length > 0) {
+                    allItems = allItems.map((item) => ({
+                        ...item, 
+                        id: parseInt(getIdFromIRI(item['@id'])),
+                        payment_id: itemPaymentId[parseInt(getIdFromIRI(item['@id']))] ?? null
+                    }));
                 }
 
                 // Écrire les items mis à jour dans la base de données
                 await writeItemsToDb(allItems);
-
 
                 // Déterminer le statut des paiements
                 const paymentStatuses = {};
@@ -369,11 +429,11 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
                     if (payment.status === 'terminé') {
                         return;
                     }
-                    const paymentId = payment['@id'].split('/').pop();
+                    const paymentId = getIdFromIRI(payment['@id']);
                     const paymentItems = allItems.filter(item => item.payment_id === paymentId);
                     let status = 'en cours';
                     if (paymentItems.length > 0) {
-                        const collectedItems = paymentItems.filter(item => item.details.itemStateName === 'COLLECTED');
+                        const collectedItems = paymentItems.filter(item => item.itemStateName === 'COLLECTED');
                         if (collectedItems > 0) {
                             if (collectedItems === paymentItems.length) {
                                 status = 'terminé';
@@ -391,7 +451,6 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
                     payment.status = paymentStatuses[payment.id];
                 }
 
-
                 const paymentsToUpdate = [];
 
                 let BDItems = await getAllItemsFromDb();
@@ -403,12 +462,11 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
                     if (payment.amount < 0) {
                         continue;
                     }
-                    const paymentId = payment['@id'].split('/').pop();
+                    const paymentId = getIdFromIRI(payment['@id']);
                     const collectedItemsCount = BDItems.filter(item => item.payment_id === paymentId && item.status === 'COLLECTED').length;
 
                     payment.items_collectes = collectedItemsCount;
                     payment.items_totaux = (payment.amount / 100);
-
 
                     if (payment.items_collectes === payment.items_totaux) {
                         payment.status = 'terminé';
@@ -425,7 +483,15 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
                 await updateCollectedCountPaymentToDb(paymentsToUpdate);
                 BDItems = await getAllItemsFromDb();
 
-                const result = {payments: allPayments, items: BDItems};
+                // Manage pagination
+                let paymentsPagination = paginator.page(totalItems, itemsPerPage, page);
+                
+                // Custom trick because isCurrent may be incoherent
+                if(paymentsPagination.pages[page - 1] !== undefined) {
+                    paymentsPagination.pages[page - 1].isCurrent = true;
+                }
+
+                const result = {payments: allPayments, items: BDItems, pagination: paymentsPagination};
                 resolve(result);
             } catch (error) {
                 console.error('Erreur lors de la récupération des données:', error);
@@ -443,7 +509,6 @@ async function fetchPaymentsAndItems(token, cookieHeader, refreshDate = lastRefr
 
 //Queue de traitement des tâches (fait pour éviter les erreurs de concurrence)
 function processQueue() {
-
     console.log('Processing queue..., i still have ', requestQueue.length, ' tasks to do');
 
     if (requestQueue.length === 0) {
@@ -452,7 +517,9 @@ function processQueue() {
     lock.acquire('fetchLock', async (done) => {
         try {
             const task = requestQueue.shift();
-            await task();
+            if(task) {
+                await task();
+            }
         } catch (error) {
             console.error('Error processing task:', error);
         } finally {
@@ -470,7 +537,7 @@ function processQueue() {
 
 // Fonction utilisée pour les statistiques, extrait les données des items
 async function fetchItemsData(token, cookieHeader) {
-    const response = await fetch(`http://mosh-back.rag-cloud-bg.hosteur.com/api/items?page=1&itemType.name=MAMA%20Item`, {
+    const response = await fetch(`${apiItems}?page=1&itemsPerPage=${itemsPerPage}&itemType.name=${itemTypeToFetch}`, {
         headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
@@ -482,7 +549,7 @@ async function fetchItemsData(token, cookieHeader) {
     hasMoreData = dataItems['hydra:view'] && dataItems['hydra:view']['hydra:next'] !== undefined;
     let page = 2;
     while (hasMoreData) {
-        const response = await fetch(`http://mosh-back.rag-cloud-bg.hosteur.com/api/items?page=${page}&itemType.name=MAMA%20Item`, {
+        const response = await fetch(`${apiItems}?page=${page}&itemsPerPage=${itemsPerPage}&itemType.name=${itemTypeToFetch}`, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
@@ -523,7 +590,7 @@ async function fetchItemsData(token, cookieHeader) {
 // Fonction pour extraire les données des items pour le graphique de ligne
 async function fetchItemsDateData() {
     console.log('Fetching items date data..., current time is ', new Date().toISOString());
-    const db = await openDb();
+    db = await openDb();
 
     // Fonction pour générer toutes les tranches de 5 minutes de la journée actuelle
     function generateTimeIntervals() {
@@ -587,8 +654,6 @@ async function fetchItemsDateData() {
         await db.exec('ROLLBACK');
         console.error('Error fetching items date data:', err);
         throw err;
-    } finally {
-        await db.close();
     }
 }
 
@@ -603,6 +668,10 @@ app.get('/db', async (req, res) => {
         }
 
         const {payments, items} = {payments: [], items: []};
+
+        if (req.query.page) {
+            page = req.query.page;
+        }
 
         res.render('dashboard', {
             payments: payments,
@@ -619,8 +688,6 @@ app.get('/db', async (req, res) => {
 
 // Route pour afficher les statistiques
 app.get('/stats', async (req, res) => {
-
-
     try {
 
         let token = req.session.token;
@@ -645,9 +712,6 @@ app.get('/stats', async (req, res) => {
 
 // Route pour obtenir les stats
 app.get('/api/stats', async (req, res) => {
-
-    console.log("API STATS");
-
     try {
         let token = req.session.token;
         if (!token) {
@@ -674,7 +738,6 @@ app.get('/api/stats', async (req, res) => {
 
 //Route pour obtenir les données dashboard
 app.get('/api/data', async (req, res) => {
-
     requestQueue.length = 0;
 
     try {
@@ -686,10 +749,11 @@ app.get('/api/data', async (req, res) => {
 
         const {
             payments,
-            items
-        } = await fetchPaymentsAndItems(token, req.session.cookieHeader, undefined, true);
+            items,
+            pagination
+        } = await fetchPaymentsAndItems(token, req.session.cookieHeader, page, undefined, true);
 
-        res.json({payments: payments, items: items});
+        res.json({payments: payments, items: items, pagination: pagination.render({baseUrl: '/db' })});
 
     } catch (error) {
         console.error('Erreur lors de la récupération des données:', error);
