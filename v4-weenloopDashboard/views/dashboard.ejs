@@ -17,9 +17,11 @@
         let slider;
         let allPayments = [];
         let allItems = [];
+        let paginationHtml = '';
         let loading = true;
         let festivalEnded = false;
         let currentController = null;
+        let fetchDataInterval;
 
         function formatDate(dateString) {
             const date = new Date(dateString);
@@ -50,15 +52,23 @@
             }, 5000);
         }
 
+        async function getRefreshDate() {
+            const refreshDate = await fetch('/api/refreshDate')
+                .then((response) => response.json())
+                .catch(handleError);
+            const refreshDateContainer = document.getElementById('refresh-date');
+            refreshDateContainer.textContent = `Paiements effectués après le : ${new Date(refreshDate).toLocaleDateString('fr-FR')} ${new Date(refreshDate).toLocaleTimeString('fr-FR')}`;  
+        }
 
         async function fetchData() {
-
             const data = await fetch('/api/data')
                 .then(response => response.json())
                 .catch(handleError);
             loading = false;
+
             allPayments = data.payments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             allItems = data.items;
+            paginationHtml = data.pagination;
 
             displayFilteredData();
 
@@ -119,10 +129,12 @@
                     </td>
                     <td>${payment['@id'].split('/').pop()}</td>
                     <td>${formatDate(payment.createdAt)}</td>
-                    <td>${amountInEuros} € (dont ${(amountInEuros * 0.4).toFixed(1)}0€ de frais d'usage)</td>
+                    <td>${amountInEuros} € (dont ${(amountInEuros * 0.4).toFixed(1)}0 € de frais d'usage)</td>
                     <td>${payment.items_collectes < 1 && !festivalEnded ? '/'
-                    : payment.items_collectes < 1 && festivalEnded ? '0.00 €'
-                        : (payment.items_collectes - payment.items_collectes * 0.4).toFixed(1) + '0 €'}</td>                    <td>${payment.amount / 100}</td>
+                        : payment.items_collectes < 1 && festivalEnded ? '0.00 €'
+                        : (payment.items_collectes - payment.items_collectes * 0.4).toFixed(1) + '0 €'}</td>                    
+                    <td>${payment.amount / 100}</td>
+                    <td>${payment.paymentMedia ?? '–'}</td>
                     <td class="${payment.status === 'terminé' ? 'grey-bg' : festivalEnded ? 'grey-bg' : ''}">${payment.status === 'en cours' && festivalEnded ? 'terminé' : payment.status}</td>
 
                 `;
@@ -131,7 +143,7 @@
                 const itemsTr = document.createElement('tr');
                 itemsTr.classList.add('explode', 'hide');
                 itemsTr.innerHTML = `
-                    <td colspan="7" style="background: #f3fffb; display: none;">
+                    <td colspan="8" style="background: #f3fffb; display: none;">
                         <table class="table table-condensed">
                             <thead>
                                 <tr>
@@ -169,6 +181,9 @@
                     $(tr).find('.exploder').toggleClass('btn-success btn-danger').children("span").toggleClass("glyphicon-chevron-right glyphicon-chevron-down");
                 }
             });
+
+            const paginationBlock = document.getElementById('items-pagination');
+            paginationBlock.innerHTML = paginationHtml;
 
             $(".exploder").off('click').on('click', function (event) {
 
@@ -219,6 +234,8 @@
                 festivalEnded = true;
                 handleFestivalEnd();
             });
+            
+            getRefreshDate();
 
             slider = document.getElementById('hour-slider');
 
@@ -253,7 +270,7 @@
             });
 
             fetchData();
-            setInterval(fetchData, 5000);
+            fetchDataInterval = setInterval(fetchData, 5000);
         });
 
         async function manualRefresh() {
@@ -263,12 +280,9 @@
             const responseText = await response.text();
             const refreshDate = document.getElementById('refresh-date');
             refreshDate.textContent = `Dernière mise à jour : ${new Date().toLocaleTimeString('fr-FR')}`;
-
-
         }
-
-
     </script>
+
     <style>
         body {
             font-family: 'Outfit', sans-serif;
@@ -343,7 +357,7 @@
         .refresh-container {
             position: fixed;
             top: 20px;
-            right: 18vh;
+            right: 5rem;
             display: flex;
             align-items: end;
             justify-content: end;
@@ -410,14 +424,14 @@
             padding: 0.75rem;
             border-bottom: 1px solid #edf2f7;
             vertical-align: top;
-            font-size: 1.9vh;
+            font-size: 1.4rem;
             text-align: center;
         }
 
         th {
             background-color: #f7fafc;
             font-weight: 600;
-            font-size: 2vh;
+            font-size: 1.5rem;
         }
 
         tr:last-child td {
@@ -432,7 +446,7 @@
         #stats-page-link {
             position: fixed;
             top: 20px;
-            left: 35vh;
+            left: 220px;
             font-family: 'Outfit', sans-serif;
             color: #74BDB6;
             cursor: pointer;
@@ -681,6 +695,7 @@
                     <th>Montant payé pour les contenants</th>
                     <th>Montant remboursé</th>
                     <th>Nombre de contenants</th>
+                    <th>Paiement</th>
                     <th>Statut</th>
                 </tr>
                 </thead>
@@ -689,6 +704,8 @@
                 </tbody>
             </table>
         </div>
+
+        <div id="items-pagination" class="pagination"></div>
     </div>
 </div>
 <img class="top-left-img" src="/reuse-logopng.png" alt="Logo">
