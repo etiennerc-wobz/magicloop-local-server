@@ -134,6 +134,7 @@
                         : payment.items_collectes < 1 && festivalEnded ? '0.00 €'
                         : (payment.items_collectes - payment.items_collectes * 0.4).toFixed(1) + '0 €'}</td>                    
                     <td>${payment.amount / 100}</td>
+                    <td>${payment.paymentMedia ?? '–'}</td>
                     <td class="${payment.status === 'terminé' ? 'grey-bg' : festivalEnded ? 'grey-bg' : ''}">${payment.status === 'en cours' && festivalEnded ? 'terminé' : payment.status}</td>
 
                 `;
@@ -142,7 +143,7 @@
                 const itemsTr = document.createElement('tr');
                 itemsTr.classList.add('explode', 'hide');
                 itemsTr.innerHTML = `
-                    <td colspan="7" style="background: #f3fffb; display: none;">
+                    <td colspan="8" style="background: #f3fffb; display: none;">
                         <table class="table table-condensed">
                             <thead>
                                 <tr>
@@ -694,6 +695,7 @@
                     <th>Montant payé pour les contenants</th>
                     <th>Montant remboursé</th>
                     <th>Nombre de contenants</th>
+                    <th>Paiement</th>
                     <th>Statut</th>
                 </tr>
                 </thead>

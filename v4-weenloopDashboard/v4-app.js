@@ -15,21 +15,14 @@ const paginator = paginate();
 
 const lock = new AsyncLock();
 const requestQueue = [];
-//const apiHostProd = 'http://mosh-back.rag-cloud-bg.hosteur.com/api'; // Prod
-//const apiHostDev = 'http://localhost:8000/api'; // Dev
 
-// Change here to use dev API
+// Change env file to use another API and/or set API user credentials
 const apiHost = process.env.API_URL;
-
-console.log(apiHost);
-
-// Switch to apiHostDev to use app with dev API
+const apiUsername = process.env.API_USERNAME;
+const apiPassword = process.env.API_PASSWORD;
 const apiItems = `${apiHost}/items`;
 const apiLoginCheck = `${apiHost}/login_check`;
 const apiPaymentTransactions = `${apiHost}/payment_transactions`
-
-const apiUsername = process.env.API_USERNAME;
-const apiPassword = process.env.API_PASSWORD;
 
 const app = express();
 const now = new Date();
