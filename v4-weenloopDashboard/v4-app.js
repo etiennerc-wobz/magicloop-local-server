@@ -11,7 +11,6 @@ import {open} from "sqlite";
 import AsyncLock from 'async-lock';
 
 import paginate from 'paginate'; //instead of const express = require('express');
-import { isSet } from 'util/types';
 
 const paginator = paginate();
 
@@ -356,7 +355,6 @@ async function fetchPaymentsAndItems(
             options[element] = defaultOption[element];
         }
     });
-    console.log(options);
     return new Promise((resolve, reject) => {
         const task = async () => {
             try {
@@ -567,7 +565,6 @@ async function fetchPaymentsAndItems(
                     const collectedItemsCount = BDItems.filter(item => item.payment_id === paymentId && item.status === 'COLLECTED').length;
 
                     payment.items_collectes = collectedItemsCount;
-                    // payment.items_totaux = (payment.amount / 100);
 
                     if (payment.items_collectes === payment.nbOfItems) {
                         payment.status = 'terminé';
@@ -998,12 +995,6 @@ app.post('/api/data', async (req, res) => {
         const paymentTypes = req.body.selectedPaymentTypes.map((paymentType) => paymentType.id);
         const startTime = convertTimeToFloat(req.body.startTime);
         const endTime = convertTimeToFloat(req.body.endTime);
-        
-        // const timezoneOffset = new Date().getTimezoneOffset() / 60;
-        // const startTime = convertTimeToFloat(req.body.startTime) + timezoneOffset;
-        // if (startTime < 0) startTime = 0;
-        // const endTime = convertTimeToFloat(req.body.endTime) + timezoneOffset;
-        // if (endTime > 24) endTime = 0;
 
         let token = req.session.token;
         if (!token) {

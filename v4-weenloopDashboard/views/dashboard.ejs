@@ -311,18 +311,7 @@
                     <td>${payment.items_collectes < 1 && paymentItemsStatus.paired < 1 && !festivalEnded ? '/'
                         : payment.items_collectes < 1 && (festivalEnded || paymentItemsStatus.paired > 0) ? '0.00 €'
                         : payment.refundedAmount.toFixed(2) + ' €'}</td>
-                    <!--<td>${paymentItemsStatus.paired} / ${paymentItemsStatus.inUse} / ${paymentItemsStatus.collected} / ${paymentItemsStatus.total}</td>-->
-                    <td>
-                        ${paymentItemsStatus.total} / ${paymentItemsStatus.collected}
-                        <!--<span class="icon-question-mark">
-                            <i data-toggle="tooltip" data-bs-placement="right" data-bs-html="true" class="fa-regular fa-circle-question" title="
-                                <strong>${paymentItemsStatus.paired}</strong> appairés<br />
-                                <strong>${paymentItemsStatus.inUse}</strong> en cours d'utilisation<br />
-                                <strong>${paymentItemsStatus.collected}</strong> collectés<br />
-                                <strong>${paymentItemsStatus.total}</strong> total
-                            "></i>
-                        </span>-->
-                    </td>
+                    <td>${paymentItemsStatus.total} / ${paymentItemsStatus.collected}</td>
                     <td>${payment.paymentMedia ?? '–'}</td>
                     <td class="${payment.status === 'terminé' ? 'grey-bg' : festivalEnded ? 'grey-bg' : ''}">
                         ${payment.status === 'en cours' && festivalEnded ? 'terminé' :
