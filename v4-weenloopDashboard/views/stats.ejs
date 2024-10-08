@@ -3,12 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stats</title>
+    <title>Magic Loop - Stats</title>
+
+    <!-- Font -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit&display=swap">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" />
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    <!-- ChartJS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
@@ -18,55 +30,211 @@
         let myLineChart = null;
         let lastPieData = null;
         let lastLineData = null;
+        let maxLineChart = 0;
+        const PIE_CHART = 0;
+        const LINE_CHART = 1;
+
+        let countCall = 0;
+
+        let fetchStatsInterval;
+
+        const defaultItemTypes = [{id: 'MG33IML', text: 'Mosh G33 IML'}, {id: 'MG50STICKER', text: 'Mosh G50 Sticker'}];
+        const defaultPaymentTypes = [{id: 'CB', text: 'CB'}, {id: 'CASHLESS', text: 'Cashless'}];
+        const defaultIotTypes = [{id: '30'}, {id: '31'}];
+
+        const MG33IML_INDEX = 0;
+        const MG50STICKER_INDEX = 1;
+
+        const SECOND_IN_MILLISECONDS = 1000;
+        const TIME_BEFORE_UPDATE = 8 * SECOND_IN_MILLISECONDS;
+
+        let selectedItemTypes = defaultItemTypes;
+        let selectedPaymentTypes = defaultPaymentTypes;
+        let selectedIotTypes = defaultIotTypes;
 
         // Function to handle errors by displaying an error message on the page
         function handleError(error) {
+            if (error.name === 'AbortError') {
+                return;
+            }
             const errorContainer = document.createElement('div');
             errorContainer.style = 'position: fixed; top: 0; left: 0; right: 0; z-index:10; padding: 1rem; background-color: #ff0000; color: #ffffff; font-weight: 600; text-align: center;';
-            errorContainer.textContent = 'Une erreur est survenue lors de la récupération des données. Veuillez tenter de relancer le serveur.';
+            errorContainer.textContent = "Une erreur est survenue lors de la récupération des données. Veuillez tenter de relancer l'app.";
             document.body.appendChild(errorContainer);
             console.error(error);
+
+            setTimeout(() => {
+                errorContainer.remove();
+            }, 5000);
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
+        $(document).ready(function () {
+            $('.multiple-select-field').select2( {
+                theme: "bootstrap-5",
+                width: $(this).data('width') ? $(this).data('width') : $(this).hasClass('w-100') ? '100%' : 'style',
+                placeholder: $(this).data('placeholder'),
+                closeOnSelect: false
+            });
+
+            $('#filters').on('change', '#item-type-filter .multiple-select-field', function() {
+                stopFetchStatsInterval()
+                selectedItemTypes = $(this).select2('data');
+                startFetchData({withForceReload: true, withLoader: true});
+                resetFetchStatsInterval();
+            });
+
+            $('#filters').on('change', '#payment-type-filter .multiple-select-field', function() {
+                stopFetchStatsInterval()
+                selectedPaymentTypes = $(this).select2('data');
+                startFetchData({withForceReload: true, withLoader: true});
+                resetFetchStatsInterval();
+            });
+
+            /* Desactivated for now
+            $('#filters').on('change', '#iot-type-filter .multiple-select-field', function() {
+                selectedIotTypes = $(this).select2('data');
+                resetFetchStatsInterval();
+                startFetchData();
+            });
+            */
+            
             const statsPageButton = document.getElementById('main-page-button');
             statsPageButton.addEventListener('click', () => {
                 window.location.href = '/db';
             });
 
-            fetchStatsData().then(data => {
-                if (data) {
-                    displayPieChart(data.pieData);
-                    displayLineChart(data.lineData);
-                }
-            }).catch(handleError);
+            startFetchData({withForceReload: true, withLoader: true});
+            resetFetchStatsInterval();
+        });
 
-            setInterval(async () => {
-                try {
-                    const newData = await fetchStatsData();
-                    if (newData) {
-                        if (!dataIsEqual(lastPieData, newData.pieData)) {
-                            lastPieData = newData.pieData;
-                            displayPieChart(newData.pieData);
+        function getChartTitle(chartType) {
+            let preTitle;
+            let postTitle;
+            switch(chartType) {
+                case PIE_CHART:
+                    preTitle = 'Cumul en temps réel ';
+                    postTitle = 'Sur toute la durée de l\'événement'
+                    break;
+                case LINE_CHART:
+                    preTitle = 'Activité ';
+                    postTitle = 'Le ' + new Date().toLocaleDateString('fr-FR');
+                    break;
+                default:
+                    preTitle = 'Graphique ';
+                    postTitle = '';
+                    break;
+            }
+            const paymentTypes = selectedPaymentTypes.length !== 0 ? selectedPaymentTypes : defaultPaymentTypes;
+            const itemTypes = selectedItemTypes.length !== 0 ? selectedItemTypes : defaultItemTypes;
+            const title = preTitle + 'via ' + paymentTypes.map((paymentType) => paymentType.text).join(' & ');
+            const subtitle = itemTypes.map((itemType) => itemType.text);
+
+            return [
+                title,
+                postTitle,
+                ...subtitle
+            ];
+        }
+
+        function getPieChartOptions() {
+            return {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        enabled: true
+                    },
+                    title: {
+                        text: getChartTitle(PIE_CHART),
+                        display: true
+                    }
+                }
+            };
+        }
+
+        function getLineChartOptions() {
+            return {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        enabled: true
+                    },
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                            threshold: 10
+                        },
+                        zoom: {
+                            wheel: {
+                                enabled: true
+                            },
+                            pinch: {
+                                enabled: true
+                            },
+                            mode: 'x',
                         }
-                        if (!dataIsEqual(lastLineData, newData.lineData)) {
-                            lastLineData = newData.lineData;
-                            displayLineChart(newData.lineData);
+                    },
+                    title: {
+                        text: getChartTitle(LINE_CHART),
+                        display: true
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0,
+                        max: maxLineChart,
+                        ticks: {
+                            precision: 0
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            maxTicksLimit: 12
                         }
                     }
-                } catch (error) {
-                    handleError(error);
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
                 }
-            }, 8000);
-        });
+            };
+        }
+
+        function addLoader() {
+            let parentWidth = $('.chart-container').innerWidth();
+            $('.overlay-spinner').css({width: parentWidth + 'px'}).show();
+        }
+
+        function removeLoader() {
+            $('.overlay-spinner').hide();
+        }
 
         // Function to fetch statistics data from the server
         async function fetchStatsData() {
-            const response = await fetch('/api/stats');
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
+            const data = await fetch('/api/stats', {
+                method: "POST", 
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({selectedItemTypes, selectedPaymentTypes, selectedIotTypes})
+            })
+                .then(function(response) {
+                    return response;
+                })
+                .catch(handleError);
+            
+            if (!data.ok) {
+                throw new Error('An error occurred while accessing stats data');
             }
-            return response.json();
+            return data.json();
         }
 
         // Function to compare two data objects for equality
@@ -84,34 +252,23 @@
             myPieChart = new Chart(ctx, {
                 type: 'pie',
                 data: {
-                    labels: ['Rendu', "En cours d'utilisation", 'En stock'],
+                    labels: ['En stock', 'En cours d\'utilisation', 'Rendu'],
                     datasets: [{
                         data: data.values,
                         backgroundColor: [
-                            'rgba(255, 99, 132, 0.2)',
+                            'rgba(255, 206, 86, 0.2)',
                             'rgba(54, 162, 235, 0.2)',
-                            'rgba(255, 206, 86, 0.2)'
+                            'rgba(255, 99, 132, 0.2)'
                         ],
                         borderColor: [
-                            'rgba(255, 99, 132, 1)',
+                            'rgba(255, 206, 86, 1)',
                             'rgba(54, 162, 235, 1)',
-                            'rgba(255, 206, 86, 1)'
+                            'rgba(255, 99, 132, 1)'
                         ],
                         borderWidth: 1
                     }]
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                        },
-                        tooltip: {
-                            enabled: true
-                        }
-                    }
-                }
+                options: getPieChartOptions()
             });
         }
 
@@ -122,9 +279,30 @@
                 myLineChart.destroy();
             }
 
+            // Get max y
+            let max = 0;
+            data.valuesAssociation.forEach(function(val) {
+                max = Math.max(max, val);
+            });
+            data.valuesCollection.forEach(function(val) {
+                max = Math.max(max, val);
+            });
+
+            if (max === 0) {
+                max = 2;
+            }
+            else if (max <= 10) {
+                max = max + 1;
+            }
+            else {
+                max = Math.round(max + (max/10));
+            }
+
+            maxLineChart = max;
+            const now = new Date().toJSON().slice(0, 10);
+
             const adjustedLabels = data.labels.map(label => {
-                const date = new Date(`1970-01-01T${label}:00Z`);
-                date.setHours(date.getHours() + 2);
+                const date = new Date(`${now}T${label}:00Z`);
                 return date.toISOString().substr(11, 5); // Extract HH:MM
             });
 
@@ -133,55 +311,72 @@
                 data: {
                     labels: adjustedLabels,
                     datasets: [{
-                        label: 'Débit association',
+                        label: 'Sortie',
                         data: data.valuesAssociation,
                         backgroundColor: 'rgba(54, 162, 235, 0.2)',
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 1,
-                        fill: true,
-                        stepped: 'middle',
                         pointStyle: false
                     },
-                        {
-                            label: 'Débit collecte',
-                            data: data.valuesCollection,
-                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                            borderColor: 'rgba(255, 99, 132, 1)',
-                            borderWidth: 1,
-                            fill: true,
-                            stepped: 'middle',
-                            pointStyle: false
-                        }]
+                    {
+                        label: 'Retour',
+                        data: data.valuesCollection,
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1,
+                        pointStyle: false
+                    }]
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                        },
-                        tooltip: {
-                            enabled: true
-                        },
-                        zoom: {
-                            pan: {
-                                enabled: true,
-                                mode: 'x',
-                                threshold: 10
-                            },
-                            zoom: {
-                                wheel: {
-                                    enabled: true
-                                },
-                                pinch: {
-                                    enabled: true
-                                },
-                                mode: 'x',
-                            }
-                        }
+                options: getLineChartOptions()
+            });
+        }
+
+        async function startFetchData(options =  {}) {
+            countCall ++;
+            const withLoader = options.withLoader !== undefined ? options.withLoader : false;
+            const withForceReload = options.withForceReload !== undefined ? options.withForceReload : false;
+            if (withLoader) {
+                addLoader();
+            }
+            try {
+                const newData = await fetchStatsData();
+                if (! withForceReload && newData) {
+                    if (!dataIsEqual(lastPieData, newData.pieData)) {
+                        lastPieData = newData.pieData;
+                        displayPieChart(newData.pieData);
+                    }
+                    if (!dataIsEqual(lastLineData, newData.lineData)) {
+                        lastLineData = newData.lineData;
+                        displayLineChart(newData.lineData);
                     }
                 }
-            });
+                else if(withForceReload) {
+                    displayPieChart(newData.pieData);
+                    displayLineChart(newData.lineData);
+                }
+                // We still reload the options even if no new data if title needs to change
+                myLineChart.options = getLineChartOptions();
+            } catch (error) {
+                handleError(error);
+            } finally {
+                countCall --;
+                if (countCall <= 0) {
+                    countCall = 0;
+                    removeLoader();
+                }
+            }
+            
+        }
+
+        function stopFetchStatsInterval() {
+            if (fetchStatsInterval) {
+                clearInterval(fetchStatsInterval);
+            }
+        }
+
+        function resetFetchStatsInterval() {
+            stopFetchStatsInterval();
+            fetchStatsInterval = setInterval(startFetchData, TIME_BEFORE_UPDATE);
         }
 
     </script>
@@ -242,18 +437,19 @@
             display: flex;
             justify-content: space-between;
             width: 80%;
+            min-height: 600px;
             max-width: 1200px;
-            margin-top: 5rem;
+            margin-top: 1rem;
             gap: 2rem;
         }
 
         .a-main-page {
             position: fixed;
             top: 20px;
-            left: 35vh;
+            left: 220px;
             padding: 0.5rem 1rem;
             color: #74BDB6;
-            font-size: 2rem;
+            font-size: 1.4rem;
         }
 
         .a-main-page:hover {
@@ -264,15 +460,33 @@
         #myPieChart {
             width: 45%;
             height: auto;
-            max-width: 500px;
+            max-width: 600px;
             max-height: 400px;
         }
 
         #myLineChart {
             width: 45%;
             height: auto;
-            max-width: 500px;
+            max-width: 600px;
             max-height: 400px;
+        }
+
+        #filter-container {
+            width: 80%;
+        }
+        
+        .overlay-spinner {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.8);
+            z-index: 10;
+            width: inherit;
+            height: 50%;
+        }
+        
+        .overlay-spinner > div {
+            margin: auto;
+            position: relative;
+            top :50%;
         }
     </style>
 </head>
@@ -282,7 +496,32 @@
 </a>
 
 <h1>Statistiques</h1>
-<div class=" chart-container">
+<div id="filter-container">
+    <div id="filters">
+        <div id="payment-type-filter">
+            <select class="form-select multiple-select-field" data-placeholder="Choisir un type de paiement" multiple>
+                <option value="CASHLESS">Cashless</option>
+                <option value="CB">Carte Bancaire</option>
+            </select>
+        </div>
+        <div class="iot-type-filter">
+            <!-- We don't use this filter anymore
+            <select class="form-select multiple-select-field" data-placeholder="Choisir un tapis" multiple>
+                <option value="30">Magic Carpet 1</option>
+                <option value="31">Magic Carpet 2</option>
+            </select>
+            -->
+        </div>
+        <div id="item-type-filter">
+            <select class="form-select multiple-select-field" data-placeholder="Choisir un type d'objet" multiple>
+                <option value="MG33IML">Mosh G33 IML</option>
+                <option value="MG50STICKER">Mosh G50 Sticker</option>
+            </select>
+        </div>
+    </div>
+</div>
+<div class="chart-container">
+    <div class="overlay-spinner text-center"><div class="spinner-border text-primary mt-2"></div></div>
     <canvas id="myLineChart"></canvas>
     <canvas id="myPieChart"></canvas>
 </div>

@@ -11,9 +11,9 @@ const initializeDatabase = async () => {
     await db.exec(`
         CREATE TABLE IF NOT EXISTS payments
         (
-            id        TEXT PRIMARY KEY,
-            createdAt TEXT,
-            items     TEXT
+            id            TEXT PRIMARY KEY,
+            validatedAt   TEXT,
+            items         TEXT
         );
     `);
 
