@@ -36,8 +36,9 @@ Before starting, you need `npm` version 20+ or `nvm` and `make`.
 3. Run `nvm use` if you're using nvm.
 4. Install the required dependencies by running `make init` in the terminal.
 5. Modify the .env file and add appropriate secrets to connect to the API.
-6. Start the application by running `make` or `make run`.
-7. The application should now be running on the address displayed in the CLI.
+6. Drop the DB by running `node initDB.js`
+7. Start the application by running `make` or `make run`.
+8. The application should now be running on the address displayed in the CLI.
 
 ## Getting Started - How to run the project
 
@@ -52,7 +53,7 @@ Applications 1 to 3:
 Application 4:
 
 1. Navigate to the folder of the specific POC you want to run (e.g., `v4-weenloopDashboard`).
-2. Start the application by running `make` or `make run`.
+2. Start the application by running `nvm use && make` or `nvm use && make run`.
 3. The application should now be running on the address displayed in the CLI.
 
 ## Folder Structure
