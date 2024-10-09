@@ -250,7 +250,6 @@
                 }
                 const paymentId = payment['@id'].split('/').pop();
                 const amountInEuros = payment.amount / 100;
-                console.log(amountInEuros);
                 if (! (payment.status in paymentStatusCount)) {
                     paymentStatusCount[payment.status] = 0;
                 }
@@ -351,7 +350,7 @@
                                     <tr>
                                         <td>${item.id}</td>
                                         <td>${item.rfid}</td>
-                                        <td>${item.itemTypeCode}</td>
+                                        <td>${item.itemTypeName}</td>
                                         <td>${(item.price === null) ? 'Inconnu' : (item.price / 100).toFixed(2) + ' €'}</td>
                                         <td class="${
                                             item.status === 'COLLECTED' ? 'light-green-bg'
@@ -931,7 +930,7 @@
                 <!-- We don't use this filter anymore
                 <select class="form-select multiple-select-field" data-placeholder="Choisir un type d'objet" multiple>
                     <option value="MG33IML">Mosh G33 IML</option>
-                    <option value="MG50STICKER">Mosh G50 Sticker</option>
+                    <option value="MG33STICKER">Mosh G33 Sticker</option>
                 </select>-->
             </div>
         </div>

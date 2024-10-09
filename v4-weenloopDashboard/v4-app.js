@@ -18,7 +18,7 @@ const lock = new AsyncLock();
 const requestQueue = [];
 
 const availableOptions = ['itemTypes', 'paymentTypes', 'rangeTime', 'iotTypes'];
-const defaultItemTypes = ['MG33IML', 'MG50STICKER'];
+const defaultItemTypes = ['MG33IML', 'MG33STICKER'];
 const defaultPaymentTypes = ['CB', 'CASHLESS'];
 const defaultIotTypes = ['30', '31'];
 const defaultRange = {startTime: '00:00', endTime: '24:00'};
@@ -291,7 +291,8 @@ async function writeItemsToDb(items) {
                                                   payment_id     = excluded.payment_id,
                                                   associationDate= excluded.associationDate,
                                                   collectionDate = excluded.collectionDate,
-                                                  itemTypeCode   = excluded.itemTypeCode
+                                                  itemTypeCode   = excluded.itemTypeCode,
+                                                  itemTypeName   = excluded.itemTypeName
                 `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null]);
             } else if (item.itemStateName === 'COLLECTED' && itemRecord.collectionDate === null) {
                 await db.run(`
@@ -304,9 +305,9 @@ async function writeItemsToDb(items) {
             }
         } else {
             await db.run(`
-                INSERT INTO items (id, rfid, status, payment_id, associationDate, collectionDate, itemTypeCode)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null, item.itemTypeCode]);
+                INSERT INTO items (id, rfid, status, payment_id, associationDate, collectionDate, itemTypeCode, itemTypeName)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null, item.itemType.code, item.itemType.name]);
         }
     }
 
@@ -602,10 +603,11 @@ async function fetchPaymentsAndItems(
                     [allPayments, paymentItems] = applyFilter(optionName, options[optionName], allPayments, paymentItems, optionFilter);
                 }
 
+
                 fetchPaymentsAndItemsResult = {payments: allPayments, paymentItems: paymentItems, items: BDItems, pagination: paymentsPagination};
                 resolve(fetchPaymentsAndItemsResult);
             } catch (error) {
-                console.error('Erreur lors de la récupération des données:', error);
+                console.error('Erreur (1) lors de la récupération des données:', error);
                 reject(error);
             }
         };
@@ -643,7 +645,7 @@ function applyFilter (optionName, selectedOptions, payments, items, options = {}
             );
             break;
         case 'itemTypes':
-            items = items.filter(item => selectedOptions.includes(item.itemTypeCode));
+            items = items.filter(item => selectedOptions.includes(item.itemType.code));
             break;
     }
     return [payments, items];
@@ -679,14 +681,14 @@ function processQueue() {
 
 // Fonction utilisée pour les statistiques, extrait les données des items
 async function fetchItemsData(token, cookieHeader) {
-    let itemTypeGetParameter = buildGetParameterFromArray(selectedItemTypes, 'itemType.code');
+    let itemTypesGetParameter = buildGetParameterFromArray(selectedItemTypes, 'itemType.code');
     let paymentTypesGetParameter = buildGetParameterFromArray(selectedPaymentTypes, 'paymentMedia');
     let url = '';
     
     // We just want the hydra totalItems so 0 is fine
     url = `${apiItems}?itemsPerPage=0`;
-    if (itemTypeGetParameter !== '') {
-        url += '&' + itemTypeGetParameter;
+    if (itemTypesGetParameter !== '') {
+        url += '&' + itemTypesGetParameter;
     }
 
     const response = await fetch(url, {
@@ -748,6 +750,7 @@ async function fetchItemsData(token, cookieHeader) {
         payments = payments.concat(pagePayments);
     }
     while(page <= maxPage);
+
     let paymentItems = [];
     payments.forEach(payment => paymentItems.push(...payment.allItems));
     paymentItems = paymentItems.map(paymentItem => paymentItem.itemId);
@@ -758,7 +761,7 @@ async function fetchItemsData(token, cookieHeader) {
     }
 
     let labels = ['STORED', 'IN_USE', 'COLLECTED'];
-    let values = [0, 0, 0, 0, 0];
+    let values = [0, 0, 0];
     let total_in_use = 0;
     let total_collected = 0;
 
@@ -889,6 +892,10 @@ async function fetchItemsDateData() {
     }
 }
 
+app.get('/', async (req, res) => {
+    return res.redirect('/db');
+});
+
 // Route pour afficher le dashboard
 app.get('/db', async (req, res) => {
     try {
@@ -907,9 +914,9 @@ app.get('/db', async (req, res) => {
         res.render('dashboard');
 
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (5) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (2) lors de la récupération des données.');
         }
     }
 });
@@ -931,9 +938,9 @@ app.get('/stats', async (req, res) => {
         res.render('stats', {data});
 
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (6) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (7) lors de la récupération des données.');
         }
     }
 });
@@ -977,9 +984,9 @@ app.post('/api/stats', async (req, res) => {
         }
         res.json(returnObj);
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (8) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (9) lors de la récupération des données.');
         }
     }
 });
@@ -1012,9 +1019,9 @@ app.post('/api/data', async (req, res) => {
         res.json({payments: payments, items: items, pagination: pagination.render({baseUrl: '/db' })});
 
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (10) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (11) lors de la récupération des données.');
         }
     }
 });
