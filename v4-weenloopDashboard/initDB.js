@@ -20,6 +20,7 @@ db.serialize(() => {
             status          TEXT,
             payment_id      TEXT,
             itemTypeCode    TEXT,
+            itemTypeName    TEXT,
             associationDate TEXT,
             collectionDate  TEXT,
             PRIMARY KEY (id, payment_id)

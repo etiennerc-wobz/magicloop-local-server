@@ -38,12 +38,9 @@
 
         let fetchStatsInterval;
 
-        const defaultItemTypes = [{id: 'MG33IML', text: 'Mosh G33 IML'}, {id: 'MG50STICKER', text: 'Mosh G50 Sticker'}];
+        const defaultItemTypes = [{id: 'MG33IML', text: 'Mosh G33 IML'}, {id: 'MG33STICKER', text: 'Mosh G33 Sticker'}];
         const defaultPaymentTypes = [{id: 'CB', text: 'CB'}, {id: 'CASHLESS', text: 'Cashless'}];
         const defaultIotTypes = [{id: '30'}, {id: '31'}];
-
-        const MG33IML_INDEX = 0;
-        const MG50STICKER_INDEX = 1;
 
         const SECOND_IN_MILLISECONDS = 1000;
         const TIME_BEFORE_UPDATE = 8 * SECOND_IN_MILLISECONDS;
@@ -151,6 +148,9 @@
                         text: getChartTitle(PIE_CHART),
                         display: true
                     }
+                },
+                interaction: {
+                    mode: 'dataset',
                 }
             };
         }
@@ -354,8 +354,6 @@
                     displayPieChart(newData.pieData);
                     displayLineChart(newData.lineData);
                 }
-                // We still reload the options even if no new data if title needs to change
-                myLineChart.options = getLineChartOptions();
             } catch (error) {
                 handleError(error);
             } finally {
@@ -515,7 +513,7 @@
         <div id="item-type-filter">
             <select class="form-select multiple-select-field" data-placeholder="Choisir un type d'objet" multiple>
                 <option value="MG33IML">Mosh G33 IML</option>
-                <option value="MG50STICKER">Mosh G50 Sticker</option>
+                <option value="MG33STICKER">Mosh G33 Sticker</option>
             </select>
         </div>
     </div>
