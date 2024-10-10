@@ -249,7 +249,7 @@
                     return;
                 }
                 const paymentId = payment['@id'].split('/').pop();
-                const amountInEuros = payment.amount / 100;
+                const amountInEuros = (payment.amount + feePerItem) / 100;
                 if (! (payment.status in paymentStatusCount)) {
                     paymentStatusCount[payment.status] = 0;
                 }
@@ -276,7 +276,7 @@
                         paymentItemsStatus.paired ++;
                         if (item.status === 'COLLECTED') {
                             if (item.price) {
-                                refundedAmount += (item.price - feePerItem) / 100;
+                                refundedAmount += item.price / 100;
                             }
                             paymentItemsStatus.collected ++;
                         }
@@ -351,7 +351,7 @@
                                         <td>${item.id}</td>
                                         <td>${item.rfid}</td>
                                         <td>${item.itemTypeName}</td>
-                                        <td>${(item.price === null) ? 'Inconnu' : (item.price / 100).toFixed(2) + ' €'}</td>
+                                        <td>${(item.price === null) ? 'Inconnu' : ((item.price + feePerItem) / 100).toFixed(2) + ' €'}</td>
                                         <td class="${
                                             item.status === 'COLLECTED' ? 'light-green-bg'
                                                 : item.status === 'IN_USE' && !festivalEnded ? 'light-yellow-bg'
@@ -392,7 +392,7 @@
                 <td>${filteredPayments.length} transactions</td>
                 <td><strong>TOTAL ENCAISS&Eacute;</strong></td>
                 <td>${totalAmount} € (dont ${totalFees.toFixed(1) + "0 €"} de frais d'usage)</td>
-                <td>${totalRefunded.toFixed(1) + "0"} €</td>                    
+                <td>${totalRefunded.toFixed(2)} €</td>                    
                 <td>${totalItems} / ${totalCollected}</td>
                 <td>${paymentMediaCountText.join('<br />')}</td>
                 <td>${paymentStatusCountText.join('<br />')}</td>
