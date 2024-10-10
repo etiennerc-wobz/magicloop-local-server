@@ -19,6 +19,8 @@ db.serialize(() => {
             rfid            TEXT,
             status          TEXT,
             payment_id      TEXT,
+            itemTypeCode    TEXT,
+            itemTypeName    TEXT,
             associationDate TEXT,
             collectionDate  TEXT,
             PRIMARY KEY (id, payment_id)
@@ -36,12 +38,13 @@ db.serialize(() => {
         CREATE TABLE IF NOT EXISTS payments
         (
             id              TEXT PRIMARY KEY,
-            createdAt       TEXT,
+            validatedAt     TEXT,
             items           TEXT,
             status          TEXT,
             amount          TEXT,
             items_totaux    TEXT,
-            items_collectes TEXT
+            items_collectes TEXT,
+            payment_type    TEXT
         )
     `, (err) => {
         if (err) {

@@ -11,10 +11,26 @@ import {open} from "sqlite";
 import AsyncLock from 'async-lock';
 
 import paginate from 'paginate'; //instead of const express = require('express');
+
 const paginator = paginate();
 
 const lock = new AsyncLock();
 const requestQueue = [];
+
+const availableOptions = ['itemTypes', 'paymentTypes', 'rangeTime', 'iotTypes'];
+const defaultItemTypes = ['MG33IML', 'MG33STICKER'];
+const defaultPaymentTypes = ['CB', 'CASHLESS'];
+const defaultIotTypes = ['30', '31'];
+const defaultRange = {startTime: '00:00', endTime: '24:00'};
+const defaultOption = {
+    'itemTypes': defaultItemTypes,
+    'paymentTypes': defaultPaymentTypes,
+    'iotTypes': defaultIotTypes,
+    'rangeTime': defaultRange,
+};
+const STORED_INDEX = 0;
+const IN_USE_INDEX = 1;
+const COLLECTED_INDEX = 2;
 
 // Change env file to use another API and/or set API user credentials
 const apiHost = process.env.API_URL;
@@ -23,6 +39,29 @@ const apiPassword = process.env.API_PASSWORD;
 const apiItems = `${apiHost}/items`;
 const apiLoginCheck = `${apiHost}/login_check`;
 const apiPaymentTransactions = `${apiHost}/payment_transactions`
+
+let selectedItemTypes = defaultItemTypes;
+let selectedPaymentTypes = defaultPaymentTypes;
+let selectedIotTypes = defaultIotTypes;
+
+const maxItemsPerPage = 25;
+
+/**
+ * Includes result from fetchPaymentsAndResults
+ * Model:
+ *      {
+ *          payments: array,
+ *          paymentItems: array,
+ *          items: array,
+ *          pagination: Object
+ *      }
+ */
+let fetchPaymentsAndItemsResult = {};
+
+const MINUTE_IN_SECONDS = 60;
+const SECOND_IN_MILLISECONDS = 1000;
+
+const TIME_BEFORE_UPDATE = 5 * SECOND_IN_MILLISECONDS;
 
 const app = express();
 const now = new Date();
@@ -36,7 +75,6 @@ minute = minute - 1; // JBO : To ensure to be the day before or... ? Why - 1 ?
 const second = String(now.getSeconds()).padStart(2, '0');
 const formattedDate = `${year}-${month}-${day}T${hour}:${minute}:${second}+00:00`;
 
-const itemTypeToFetch = 'MAMA%20Item';
 
 const transactionType = {
     payment: 'PAYMENT',
@@ -65,6 +103,9 @@ app.set('view engine', 'ejs');
 app.use(express.static('public'));
 
 // Middleware pour parser les corps de requêtes JSON
+app.use(bodyParser.urlencoded({
+    extended: true
+}));
 app.use(bodyParser.json());
 
 // Configuration de la session
@@ -94,6 +135,29 @@ const wipeAllDBRows = async () => {
     db = await openDb();
     await db.exec('DELETE FROM payments');
     await db.exec('DELETE FROM items');
+}
+
+/**
+ * 
+ * @param {string} time Time must be formatted like HH:MM
+ * @returns A float conversion of time (i.e. 8:30 => 8.5)
+ */
+function convertTimeToFloat(time) {
+    if(typeof time !== 'string') {
+        return time;
+    }
+    const hours = parseInt(time.split(':').shift()) % 24;
+    const minutes = parseInt(time.split(':').pop()) % 60;
+    return (hours + (minutes / MINUTE_IN_SECONDS));
+}
+
+function buildGetParameterFromArray(array, parameterName) {
+    let value;
+    let getParameterArray = [];
+    for (value of array) {
+        getParameterArray.push(encodeURI(parameterName + "[]=" + value));
+    }
+    return getParameterArray.join('&');
 }
 
 // Fonction pour effectuer le login et stocker le token
@@ -162,9 +226,9 @@ async function writePaymentsToDb(payments) {
         await db.run(`
             INSERT OR
             REPLACE
-            INTO payments (id, createdAt, items, amount, status, items_collectes, items_totaux)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [payment.id, payment.createdAt, payment.items, payment.amount, payment.status, payment.items_collectes, payment.items_totaux]);
+            INTO payments (id, validatedAt, items, amount, status, items_collectes, items_totaux, payment_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [payment.id, payment.validatedAt, payment.items, payment.amount, payment.status, payment.items_collectes, payment.items_totaux, payment.payment_type]);
     }
 
     await db.exec('COMMIT');
@@ -226,7 +290,9 @@ async function writeItemsToDb(items) {
                                                   status         = excluded.status,
                                                   payment_id     = excluded.payment_id,
                                                   associationDate= excluded.associationDate,
-                                                  collectionDate = excluded.collectionDate
+                                                  collectionDate = excluded.collectionDate,
+                                                  itemTypeCode   = excluded.itemTypeCode,
+                                                  itemTypeName   = excluded.itemTypeName
                 `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null]);
             } else if (item.itemStateName === 'COLLECTED' && itemRecord.collectionDate === null) {
                 await db.run(`
@@ -239,9 +305,9 @@ async function writeItemsToDb(items) {
             }
         } else {
             await db.run(`
-                INSERT INTO items (id, rfid, status, payment_id, associationDate, collectionDate)
-                VALUES (?, ?, ?, ?, ?, ?)
-            `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null]);
+                INSERT INTO items (id, rfid, status, payment_id, associationDate, collectionDate, itemTypeCode, itemTypeName)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `, [item.id, item.rfid, item.itemStateName, item.payment_id, itemDate, null, item.itemType.code, item.itemType.name]);
         }
     }
 
@@ -249,11 +315,11 @@ async function writeItemsToDb(items) {
     await db.exec('COMMIT');
 }
 
-
 // Fonction pour extraire les items depuis la base de données et associer l'ID du paiement
 async function extractItemsFromDb() {
     db = await openDb();
-    const payments = await db.all("SELECT id, items, status FROM payments WHERE status != 'terminé' OR status IS NULL");
+    // const payments = await db.all("SELECT id, items, status FROM payments WHERE status != 'terminé' OR status IS NULL");
+    const payments = await db.all("SELECT id, items, status FROM payments");
 
     const items = [];
     payments.forEach(payment => {
@@ -277,85 +343,122 @@ app.get('/api/refreshDate', async (req, res) => {
 });
 
 // Fonction pour extraire les paiements via API et les lier aux items
-async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate = lastRefreshDate, prioritize = false) {
+async function fetchPaymentsAndItems(
+    token,
+    cookieHeader,
+    page = null,
+    refreshDate = lastRefreshDate,
+    prioritize = false,
+    options = {}
+) {
+    availableOptions.forEach(function (element) {
+        if (! Object.hasOwn(options, element) || options[element] == null || options[element].length === 0) {
+            options[element] = defaultOption[element];
+        }
+    });
     return new Promise((resolve, reject) => {
         const task = async () => {
             try {
-                let allPayments = [];
-                let url = `${apiPaymentTransactions}` +
-                    `?page=${page}` +
-                    `&itemsPerPage=${itemsPerPage}` +
-                    `&transactionType.type=${transactionType.payment}` +
-                    `&createdAt%5Bafter%5D=${encodeURIComponent(refreshDate)}` +
-                    `&amount%5Bgt%5D=0` +
-                    `&order%5BcreatedAt%5D=desc` + 
-                    `&order%5BtransactionId%5D=asc`
-                ;
-
-                console.log('Fetching data at date after ', refreshDate, ' ....');
-
-                const response = await fetch(url, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                        'Cookie': cookieHeader
-                    },
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                allPayments = data['hydra:member'];
-                totalItems = data['hydra:totalItems'];
+                let maxPage = null;
+                let paymentsToWrite = [];
 
                 // Lire les paiements déjà enregistrés
                 const recordedPayments = await readPaymentsFromDb();
                 const recordedPaymentsMap = new Map(recordedPayments.map(p => [p.id, p]));
+                let allPayments = [];
 
-                // Identifier les nouveaux paiements et les paiements existants avec des mises à jour
-                const paymentsToWrite = [];
-                allPayments.forEach(payment => {
-                    const paymentId = getIdFromIRI(payment['@id']);
-                    const newItems = payment.items.map(item => getIdFromIRI(item)).join(',');
-
-                    if (recordedPaymentsMap.has(paymentId)) {
-                        if (recordedPaymentsMap.get(paymentId).status === 'terminé') {
-                            payment.items_collectes = recordedPaymentsMap.get(paymentId).items_collectes;
-                            payment.status = 'terminé';
-                            return;
+                if (page === null) {
+                    page = 1;
+                }
+                else {
+                    maxPage = page;
+                }
+                
+                do {
+                    let pagePayments = [];
+                    
+                    let url = `${apiPaymentTransactions}` +
+                        `?page=${page}` +
+                        `&itemsPerPage=${itemsPerPage}` +
+                        `&transactionType.type=${transactionType.payment}` +
+                        `&validatedAt%5Bafter%5D=${encodeURIComponent(refreshDate)}` +
+                        `&amount%5Bgt%5D=0` +
+                        `&order%validatedAt%5D=desc` + 
+                        `&order%5BtransactionId%5D=asc`
+                    ;
+    
+                    const response = await fetch(url, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                            'Cookie': cookieHeader
+                        },
+                    });
+    
+                    if (! response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+    
+                    const data = await response.json();
+                    pagePayments = data['hydra:member'];
+                    totalItems = data['hydra:totalItems'];
+                    if (! maxPage) {
+                        if('hydra:last' in data['hydra:view']) {
+                            maxPage = data['hydra:view']['hydra:last'].split('=').pop();
                         }
-                        // Paiement existant, vérifier si les items ont changé
-                        const recordedPayment = recordedPaymentsMap.get(paymentId);
-                        const existingItems = recordedPayment.items;
-                        if (newItems !== existingItems) {
-                            // Conserver les anciens items et ajouter les nouveaux
-                            const updatedItemsSet = new Set(existingItems.split(',').concat(newItems.split(',')));
-                            const updatedItems = Array.from(updatedItemsSet).join(',');
+                        else {
+                            maxPage = page;
+                        }
+                    }
+                    
+                    // Identifier les nouveaux paiements et les paiements existants avec des mises à jour
+                    pagePayments.forEach(payment => {
+                        const paymentId = getIdFromIRI(payment['@id']);
+                        let newItems = payment.items.map(item => getIdFromIRI(item)).join(',');
+    
+                        if (recordedPaymentsMap.has(paymentId)) {
+                            if (recordedPaymentsMap.get(paymentId).status === 'terminé') {
+                                payment.items_collectes = recordedPaymentsMap.get(paymentId).items_collectes;
+                                payment.status = 'terminé';
+                                return;
+                            }
+                            // Paiement existant, vérifier si les items ont changé
+                            const recordedPayment = recordedPaymentsMap.get(paymentId);
+                            const existingItems = recordedPayment.items;
+                            if (newItems !== existingItems) {
+                                // Conserver les anciens items et ajouter les nouveaux
+                                const updatedItemsSet = new Set(existingItems.split(',').concat(newItems.split(',')));
+                                const updatedItems = Array.from(updatedItemsSet).join(',');
+                                paymentsToWrite.push({
+                                    id: paymentId,
+                                    validatedAt: payment.validatedAt,
+                                    items: updatedItems,
+                                    amount: payment.amount,
+                                    payment_type: payment.paymentMedia
+                                });
+                            }
+                        } else {
+                            // Nouveau paiement
                             paymentsToWrite.push({
                                 id: paymentId,
-                                createdAt: payment.createdAt,
-                                items: updatedItems,
-                                amount: payment.amount
+                                validatedAt: payment.validatedAt,
+                                items: newItems,
+                                amount: payment.amount,
+                                payment_type: payment.paymentMedia
                             });
                         }
-                    } else {
-                        // Nouveau paiement
-                        paymentsToWrite.push({
-                            id: paymentId,
-                            createdAt: payment.createdAt,
-                            items: newItems,
-                            amount: payment.amount
-                        });
-                    }
-                });
-
+                    });
+                    page ++;
+                    allPayments = allPayments.concat(pagePayments);
+                }
+                while(page <= maxPage);
+            
                 // Écrire les paiements mis à jour et les nouveaux paiements dans la base de données
                 await writePaymentsToDb(paymentsToWrite);
 
                 // Extraire les items depuis la base de données locale
                 const extractedItems = await extractItemsFromDb();
+                let paymentIds = allPayments.map(payment => getIdFromIRI(payment['@id']));
 
                 // Fetch items by IDs
                 let allItems = [];
@@ -367,8 +470,7 @@ async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate 
                 }
                 const getParameter = itemIds.join(`&id%5B%5D=`);
                 let customItemPage = 1;
-                let customItemsPerPage = 50;
-                let getParameterWithPagination = getParameter + `&page=${customItemPage}&itemsPerPage=${customItemsPerPage}`;
+                let getParameterWithPagination = getParameter + `&page=${customItemPage}&itemsPerPage=${maxItemsPerPage}`;
                 let dataItems;
 
                 if(itemIds.length > 0) {
@@ -394,7 +496,7 @@ async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate 
                 let hasMoreData = dataItems && dataItems['hydra:view'] && dataItems['hydra:view']['hydra:next'] !== undefined;
                 while (hasMoreData) {
                     customItemPage ++;
-                    getParameterWithPagination = getParameter + `&page=${customItemPage}&itemsPerPage=${customItemsPerPage}`;
+                    getParameterWithPagination = getParameter + `&page=${customItemPage}&itemsPerPage=${maxItemsPerPage}`;
                     const response = await fetch(`${apiItems}?&id%5B%5D=${getParameterWithPagination}`, {
                         headers: {
                             'Authorization': `Bearer ${token}`,
@@ -408,11 +510,14 @@ async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate 
                 }
 
                 if(allItems && allItems.length > 0) {
-                    allItems = allItems.map((item) => ({
-                        ...item, 
-                        id: parseInt(getIdFromIRI(item['@id'])),
-                        payment_id: itemPaymentId[parseInt(getIdFromIRI(item['@id']))] ?? null
-                    }));
+                    allItems = allItems.map(function (item) {
+                        const itemId = parseInt(getIdFromIRI(item['@id']));
+                        return {
+                            ...item, 
+                            id: itemId,
+                            payment_id: itemPaymentId[itemId] ?? null
+                        };
+                    });
                 }
 
                 // Écrire les items mis à jour dans la base de données
@@ -461,14 +566,15 @@ async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate 
                     const collectedItemsCount = BDItems.filter(item => item.payment_id === paymentId && item.status === 'COLLECTED').length;
 
                     payment.items_collectes = collectedItemsCount;
-                    payment.items_totaux = (payment.amount / 100);
 
-                    if (payment.items_collectes === payment.items_totaux) {
+                    if (payment.items_collectes === payment.nbOfItems) {
                         payment.status = 'terminé';
                     }
+
                     paymentsToUpdate.push({
                         id: paymentId,
                         items_collectes: payment.items_collectes,
+                        items_totaux: payment.nbOfItems,
                         status: payment.status
                     });
                 }
@@ -476,6 +582,10 @@ async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate 
 
                 // Mettre à jour le nombre d'items collectés dans la base de données
                 await updateCollectedCountPaymentToDb(paymentsToUpdate);
+
+                // On filtre les items liés à un paiement
+                let paymentItems = allItems.filter(item => paymentIds.includes(item.payment_id));
+
                 BDItems = await getAllItemsFromDb();
 
                 // Manage pagination
@@ -486,10 +596,18 @@ async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate 
                     paymentsPagination.pages[page - 1].isCurrent = true;
                 }
 
-                const result = {payments: allPayments, items: BDItems, pagination: paymentsPagination};
-                resolve(result);
+                let optionFilter = {withUTCOffset: false};
+
+                // On applique les filtres pour renvoyer uniquement les paiements de la recherche
+                for (let optionName in options) {
+                    [allPayments, paymentItems] = applyFilter(optionName, options[optionName], allPayments, paymentItems, optionFilter);
+                }
+
+
+                fetchPaymentsAndItemsResult = {payments: allPayments, paymentItems: paymentItems, items: BDItems, pagination: paymentsPagination};
+                resolve(fetchPaymentsAndItemsResult);
             } catch (error) {
-                console.error('Erreur lors de la récupération des données:', error);
+                console.error('Erreur (1) lors de la récupération des données:', error);
                 reject(error);
             }
         };
@@ -500,6 +618,37 @@ async function fetchPaymentsAndItems(token, cookieHeader, page = 1, refreshDate 
         }
         processQueue();
     });
+}
+
+function applyFilter (optionName, selectedOptions, payments, items, options = {}) {
+    let utcOffset;
+    if (Object.hasOwn(options, 'withUTCOffset')) {
+        utcOffset = options.withUTCOffset;
+    }
+    else {
+        utcOffset = true; // default
+    }
+    switch (optionName) {
+        case 'paymentTypes':
+            payments = payments.filter(function(payment) {
+                return selectedOptions.includes(payment.paymentMedia)
+            });
+            break;
+        case 'rangeTime':
+            const startTimeFloat = convertTimeToFloat(selectedOptions.startTime);
+            const endTimeFloat = convertTimeToFloat(selectedOptions.endTime);
+            let timezoneOffset = utcOffset ? new Date().getTimezoneOffset() / 60 : 0;
+            payments = payments.filter(payment =>
+                payment.validatedAtTime && 
+                (startTimeFloat === 0 || payment.validatedAtTime >= startTimeFloat + timezoneOffset) && 
+                (endTimeFloat === 0 || payment.validatedAtTime <= endTimeFloat + timezoneOffset)
+            );
+            break;
+        case 'itemTypes':
+            items = items.filter(item => selectedOptions.includes(item.itemType.code));
+            break;
+    }
+    return [payments, items];
 }
 
 //Queue de traitement des tâches (fait pour éviter les erreurs de concurrence)
@@ -532,54 +681,113 @@ function processQueue() {
 
 // Fonction utilisée pour les statistiques, extrait les données des items
 async function fetchItemsData(token, cookieHeader) {
-    const response = await fetch(`${apiItems}?page=1&itemsPerPage=${itemsPerPage}&itemType.name=${itemTypeToFetch}`, {
+    let itemTypesGetParameter = buildGetParameterFromArray(selectedItemTypes, 'itemType.code');
+    let paymentTypesGetParameter = buildGetParameterFromArray(selectedPaymentTypes, 'paymentMedia');
+    let url = '';
+    
+    // We just want the hydra totalItems so 0 is fine
+    url = `${apiItems}?itemsPerPage=0`;
+    if (itemTypesGetParameter !== '') {
+        url += '&' + itemTypesGetParameter;
+    }
+
+    const response = await fetch(url, {
         headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
             'Cookie': cookieHeader
         }
     });
-    let hasMoreData = true;
+
     const dataItems = await response.json();
-    hasMoreData = dataItems['hydra:view'] && dataItems['hydra:view']['hydra:next'] !== undefined;
-    let page = 2;
-    while (hasMoreData) {
-        const response = await fetch(`${apiItems}?page=${page}&itemsPerPage=${itemsPerPage}&itemType.name=${itemTypeToFetch}`, {
+    const totalItemsCount = dataItems['hydra:totalItems'];
+    let page = 1;
+    let maxPage = null;
+    let payments = [];
+
+    // Now we fetch by payment to filter paymentTypes
+    do {
+        let pagePayments = [];
+        
+        let url = `${apiPaymentTransactions}` +
+            `?page=${page}` +
+            `&itemsPerPage=${maxItemsPerPage}` +
+            `&transactionType.type=${transactionType.payment}` +
+            `&validatedAt%5Bafter%5D=${encodeURIComponent(lastRefreshDate)}` +
+            `&amount%5Bgt%5D=0` +
+            `&order%validatedAt%5D=desc` + 
+            `&order%5BtransactionId%5D=asc`
+        ;
+
+        if (paymentTypesGetParameter !== '') {
+            url += '&' + paymentTypesGetParameter;
+        }
+
+        const response = await fetch(url, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
                 'Cookie': cookieHeader
-            }
+            },
         });
-        const newDataItems = await response.json();
-        dataItems['hydra:member'] = dataItems['hydra:member'].concat(newDataItems['hydra:member']);
-        hasMoreData = newDataItems['hydra:view'] && newDataItems['hydra:view']['hydra:next'] !== undefined
-        page++;
+
+        if (! response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        pagePayments = data['hydra:member'];
+        if (! maxPage) {
+            if('hydra:last' in data['hydra:view']) {
+                maxPage = data['hydra:view']['hydra:last'].split('=').pop();
+            }
+            else {
+                maxPage = page;
+            }
+        }
+
+        page ++;
+        payments = payments.concat(pagePayments);
     }
+    while(page <= maxPage);
+
+    let paymentItems = [];
+    payments.forEach(payment => paymentItems.push(...payment.allItems));
+    paymentItems = paymentItems.map(paymentItem => paymentItem.itemId);
+    let filteredPaymentItems = [...new Set(paymentItems)];
 
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    let labels = ['COLLECTED', 'IN_USE', 'STORED'];
+    let labels = ['STORED', 'IN_USE', 'COLLECTED'];
     let values = [0, 0, 0];
-    let i = 0;
-    for (const item of dataItems['hydra:member']) {
+    let total_in_use = 0;
+    let total_collected = 0;
+
+    for (const item of fetchPaymentsAndItemsResult.paymentItems) {
         if (item.itemStateName === 'COLLECTED') {
-            values[0] += 1;
+            total_collected ++;
+            if (filteredPaymentItems.includes(item.id)) {
+                values[COLLECTED_INDEX] ++;
+            }
         } else if (item.itemStateName === 'IN_USE') {
-            values[1] += 1;
-        } else if (item.itemStateName === 'STORED') {
-            values[2] += 1;
+            total_in_use ++;
+            if (filteredPaymentItems.includes(item.id)) {
+                values[IN_USE_INDEX] ++;
+            }
         }
     }
 
-    const returnData = {
-        labels: labels,
-        values: values
+    values[STORED_INDEX] = totalItemsCount - total_collected - total_in_use;
+    if (values[STORED_INDEX] < 0) {
+        values[STORED_INDEX] = 0;
     }
 
-    return returnData;
+    return {
+        labels: labels,
+        values: values
+    };
 }
 
 // Fonction pour extraire les données des items pour le graphique de ligne
@@ -589,36 +797,63 @@ async function fetchItemsDateData() {
 
     // Fonction pour générer toutes les tranches de 5 minutes de la journée actuelle
     function generateTimeIntervals() {
-        const start = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate(), 7, 0));
-        const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), new Date().getUTCDate(), 16, 5));
+        const startUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate(), 0, 0));
+        const endUTC = new Date(Date.UTC(startUTC.getUTCFullYear(), startUTC.getUTCMonth(), new Date().getUTCDate(), 0, 0));
+
+        const start = new Date(new Date().setHours(0, 0, 0, 0));
+        const end = new Date(new Date().setHours(0, 0, 0, 0));
+
+        end.setDate(end.getDate() + 1);
+        endUTC.setDate(endUTC.getDate() + 1);
         const intervals = [];
+        const intervalsUTC = [];
         let current = start;
 
         while (current < end) {
             intervals.push(current.toISOString().slice(0, 16)); // Format YYYY-MM-DDTHH:MM
-            current = new Date(current.getTime() + 300000); // Ajouter 5 minutes (300000 ms)
+            current = new Date(current.getTime() + 5 * MINUTE_IN_SECONDS * SECOND_IN_MILLISECONDS);
         }
-        return intervals;
+        let currentUTC = startUTC;
+
+        while (currentUTC < endUTC) {
+            intervalsUTC.push(currentUTC.toISOString().slice(0, 16)); // Format YYYY-MM-DDTHH:MM
+            currentUTC = new Date(currentUTC.getTime() + 5 * MINUTE_IN_SECONDS * SECOND_IN_MILLISECONDS);
+        }
+        return {data: intervals, label: intervalsUTC};
     }
 
     try {
+        const paymentTypesPlaceHolder = selectedPaymentTypes.map(() => '?').join(',');
+        const itemTypesPlaceHolder = selectedItemTypes.map(() => '?').join(',');
         const sqlAssociation = `SELECT strftime('%Y-%m-%dT%H:', associationDate) ||
                                        substr('00' || ((strftime('%M', associationDate) / 5) * 5), -2, 2) as interval,
                                        count(*)                                                           as count
-                                FROM items
+                                FROM (
+                                    SELECT items.*
+                                    FROM items, payments
+                                    WHERE items.payment_id = payments.id
+                                    AND items.itemTypeCode IN (${itemTypesPlaceHolder})
+                                    AND payments.payment_type IN (${paymentTypesPlaceHolder})
+                                )
                                 GROUP BY interval
                                 ORDER BY interval ASC;`;
 
         const sqlCollection = `SELECT strftime('%Y-%m-%dT%H:', collectionDate) ||
                                       substr('00' || ((strftime('%M', collectionDate) / 5) * 5), -2, 2) as interval,
                                       count(*)                                                          as count
-                               FROM items
+                               FROM (
+                                    SELECT items.*
+                                    FROM items, payments
+                                    WHERE items.payment_id = payments.id
+                                    AND items.itemTypeCode IN (${itemTypesPlaceHolder})
+                                    AND payments.payment_type IN (${paymentTypesPlaceHolder})
+                                )
                                GROUP BY interval
                                ORDER BY interval ASC;`;
 
         await db.exec('BEGIN TRANSACTION');
-        const rowsAssociation = await db.all(sqlAssociation);
-        const rowsCollection = await db.all(sqlCollection);
+        const rowsAssociation = await db.all(sqlAssociation, ...selectedItemTypes, ...selectedPaymentTypes);
+        const rowsCollection = await db.all(sqlCollection, ...selectedItemTypes, ...selectedPaymentTypes);
         await db.exec('COMMIT');
 
         // Générer toutes les tranches de 5 minutes de la période
@@ -634,11 +869,11 @@ async function fetchItemsDateData() {
             acc[row.interval] = row.count;
             return acc;
         }, {});
-
+        
         // Créer les labels et les valeurs pour le graphique
-        const labels = allIntervals.map(interval => interval.slice(11, 16)); // Seulement HH:MM
-        const valuesAssociation = allIntervals.map(interval => dataDictAssociation[interval] || 0);
-        const valuesCollection = allIntervals.map(interval => dataDictCollection[interval] || 0);
+        const labels = allIntervals.label.map(interval => interval.slice(11, 16)); // Seulement HH:MM
+        const valuesAssociation = allIntervals.data.map(interval => dataDictAssociation[interval] || 0);
+        const valuesCollection = allIntervals.data.map(interval => dataDictCollection[interval] || 0);
 
         return {
             labels,
@@ -646,16 +881,24 @@ async function fetchItemsDateData() {
             valuesCollection
         };
     } catch (err) {
-        await db.exec('ROLLBACK');
-        console.error('Error fetching items date data:', err);
-        throw err;
+        try {
+            await db.exec('ROLLBACK');
+        } catch (err) {
+
+        } finally {
+            console.error('Error fetching items date data:', err);
+            throw err;
+        }
     }
 }
+
+app.get('/', async (req, res) => {
+    return res.redirect('/db');
+});
 
 // Route pour afficher le dashboard
 app.get('/db', async (req, res) => {
     try {
-
         let token = req.session.token;
         if (!token) {
             const loginData = await loginAndGetTokenAndCookie(req);
@@ -668,15 +911,12 @@ app.get('/db', async (req, res) => {
             page = req.query.page;
         }
 
-        res.render('dashboard', {
-            payments: payments,
-            items: items
-        });
+        res.render('dashboard');
 
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (5) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (2) lors de la récupération des données.');
         }
     }
 });
@@ -692,68 +932,96 @@ app.get('/stats', async (req, res) => {
         }
 
         const data = {
-            labels: ['COLLECTED', 'IN_USE', 'STORED'],
+            labels: ['STORED', 'IN_USE', 'COLLECTED'],
             values: [0, 0, 0],
         };
         res.render('stats', {data});
 
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (6) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (7) lors de la récupération des données.');
         }
     }
 });
 
-// Route pour obtenir les stats
-app.get('/api/stats', async (req, res) => {
+/** Route pour obtenir les statistiques.
+ *  Paramètres de requête POST :
+ *      - array selectedItemTypes Type d'objets sélectionnés (vide = tous)
+ *      - array selectedPaymentTypes Type de paiements sélectionnés (vide = tous)
+ *      - array selectedIotTypes Type d'IOT sélectionnés (vide = tous) : pas utilisé pour le moment
+ */
+app.post('/api/stats', async (req, res) => {
     try {
+        selectedItemTypes = req.body.selectedItemTypes.map((itemType) => itemType.id);
+        selectedItemTypes = selectedItemTypes.length === 0 ? defaultItemTypes : selectedItemTypes;
+
+        selectedPaymentTypes = req.body.selectedPaymentTypes.map((paymentType) => paymentType.id);
+        selectedPaymentTypes = selectedPaymentTypes.length === 0 ? defaultPaymentTypes : selectedPaymentTypes;
+
+        selectedIotTypes = req.body.selectedIotTypes.map((iotType) => iotType.id);
+        selectedIotTypes = selectedIotTypes.length === 0 ? defaultIotTypes : selectedIotTypes;
+
+        const options = {itemTypes: selectedItemTypes, paymentTypes: selectedPaymentTypes, iotTypes: selectedIotTypes};
+
         let token = req.session.token;
         if (!token) {
             const loginData = await loginAndGetTokenAndCookie(req);
             token = loginData.token;
         }
-
-        fetchPaymentsAndItems(token, req.session.cookieHeader, undefined);
-
+        const {
+            payments,
+            items,
+            pagination
+        } = await fetchPaymentsAndItems(token, req.session.cookieHeader, null, undefined, true, options);
+        
         const pieData = await fetchItemsData(token, req.session.cookieHeader);
         const lineData = await fetchItemsDateData();
+
         const returnObj = {
             pieData: pieData,
             lineData: lineData
         }
         res.json(returnObj);
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (8) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (9) lors de la récupération des données.');
         }
     }
 });
 
-//Route pour obtenir les données dashboard
-app.get('/api/data', async (req, res) => {
+/**
+ *  Route pour obtenir les données dashboard
+ */
+app.post('/api/data', async (req, res) => {
     requestQueue.length = 0;
 
     try {
+        const itemTypes = req.body.selectedItemTypes.map((itemType) => itemType.id);
+        const paymentTypes = req.body.selectedPaymentTypes.map((paymentType) => paymentType.id);
+        const startTime = convertTimeToFloat(req.body.startTime);
+        const endTime = convertTimeToFloat(req.body.endTime);
+
         let token = req.session.token;
         if (!token) {
             const loginData = await loginAndGetTokenAndCookie(req);
             token = loginData.token;
         }
 
+        const options = {itemTypes, paymentTypes, rangeTime: {startTime, endTime}};
         const {
             payments,
             items,
             pagination
-        } = await fetchPaymentsAndItems(token, req.session.cookieHeader, page, undefined, true);
+        } = await fetchPaymentsAndItems(token, req.session.cookieHeader, null, undefined, true, options);
 
         res.json({payments: payments, items: items, pagination: pagination.render({baseUrl: '/db' })});
 
     } catch (error) {
-        console.error('Erreur lors de la récupération des données:', error);
+        console.error('Erreur (10) lors de la récupération des données:', error);
         if (!res.headersSent) {
-            res.status(500).send('Erreur lors de la récupération des données.');
+            res.status(500).send('Erreur (11) lors de la récupération des données.');
         }
     }
 });

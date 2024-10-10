@@ -27,17 +27,7 @@ Before starting, you need `npm`
 4. Start the application by running `npm start` (or `node server.js`  (replace server.js by the file name for the POC you're running)).
 5. The application should now be running on the address displayed in the CLI.
 
-To get started with application 4, follow these steps:
-
-Before starting, you need `npm` version 20+ or `nvm` and `make`.
-
-1. Clone the repository to your local machine.
-2. Navigate to the folder of the specific POC you want to run (e.g., `v4-weenloopDashboard`).
-3. Run `nvm use` if you're using nvm.
-4. Install the required dependencies by running `make init` in the terminal.
-5. Modify the .env file and add appropriate secrets to connect to the API.
-6. Start the application by running `make` or `make run`.
-7. The application should now be running on the address displayed in the CLI.
+To get started with application 4, please check the README in v4-weenloopDashboard folder.
 
 ## Getting Started - How to run the project
 
@@ -49,11 +39,7 @@ Applications 1 to 3:
 2. Start the application by running `npm start` (or `node server.js`  (replace server.js by the file name for the POC you're running)).
 3. The application should now be running on the address displayed in the CLI.
 
-Application 4:
-
-1. Navigate to the folder of the specific POC you want to run (e.g., `v4-weenloopDashboard`).
-2. Start the application by running `make` or `make run`.
-3. The application should now be running on the address displayed in the CLI.
+Application 4: please check the README in v4-weenloopDashboard folder.
 
 ## Folder Structure
 
