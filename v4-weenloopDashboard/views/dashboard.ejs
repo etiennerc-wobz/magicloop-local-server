@@ -249,7 +249,7 @@
                     return;
                 }
                 const paymentId = payment['@id'].split('/').pop();
-                const amountInEuros = (payment.amount + feePerItem) / 100;
+                const amountInEuros = (payment.amount + (feePerItem * payment.nbOfItems)) / 100;
                 if (! (payment.status in paymentStatusCount)) {
                     paymentStatusCount[payment.status] = 0;
                 }
