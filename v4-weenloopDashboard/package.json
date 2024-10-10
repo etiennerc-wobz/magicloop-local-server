@@ -26,6 +26,7 @@
     "tailwindcss": "^3.4.7"
   },
   "scripts": {
-    "start": "node --env-file .env v4-app.js"
+    "start": "node --env-file .env v4-app.js",
+    "systemd": "/home/magicloop-server/.nvm/versions/node/v22.9.0/bin/node --env-file .env v4-app.js"
   }
 }
