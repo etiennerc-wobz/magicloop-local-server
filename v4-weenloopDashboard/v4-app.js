@@ -414,7 +414,7 @@ async function fetchPaymentsAndItems(
                     // Identifier les nouveaux paiements et les paiements existants avec des mises à jour
                     pagePayments.forEach(payment => {
                         const paymentId = getIdFromIRI(payment['@id']);
-                        let newItems = payment.items.map(item => getIdFromIRI(item)).join(',');
+                        let newItems = payment.allItems.map(item => parseInt(item.itemId)).join(',');
     
                         if (recordedPaymentsMap.has(paymentId)) {
                             if (recordedPaymentsMap.get(paymentId).status === 'terminé') {
@@ -530,12 +530,14 @@ async function fetchPaymentsAndItems(
                         return;
                     }
                     const paymentId = getIdFromIRI(payment['@id']);
-                    const paymentItems = allItems.filter(item => item.payment_id === paymentId);
+                    const paymentItems = allItems
+                        .filter(item => item.payment_id === paymentId)
+                    ;
                     let status = 'en cours';
                     if (paymentItems.length > 0) {
-                        const collectedItems = paymentItems.filter(item => item.itemStateName === 'COLLECTED');
-                        if (collectedItems > 0) {
-                            if (collectedItems === paymentItems.length) {
+                        const collectedItemsCount = paymentItems.filter(item => item.itemStateName === 'COLLECTED').length;
+                        if (collectedItemsCount > 0) {
+                            if (collectedItemsCount === paymentItems.length) {
                                 status = 'terminé';
                             } else {
                                 status = 'en cours';
